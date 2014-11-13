@@ -17,6 +17,7 @@ package plugins
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/mozilla-services/heka/pipeline"
 )
@@ -92,6 +93,8 @@ func (oe *OpenTsdbToZabbixEncoder) Encode(pack *pipeline.PipelinePack) (output [
 		}
 	}
 
+	timestamp := time.Unix(0, pack.Message.GetTimestamp()).UTC()
+
 	if host == "" {
 		//FIXME: Add default in plugin
 		err = fmt.Errorf("Unable to find host tag in message.")
@@ -110,9 +113,13 @@ func (oe *OpenTsdbToZabbixEncoder) Encode(pack *pipeline.PipelinePack) (output [
 		return nil, err
 	}
 
-	zabbix_metrics := fmt.Sprintf("%s %s.%s %s\n", host, opentsdb_key, strings.Join(key_extension, "."), value)
-
+	// FIXME: real json encoding
+	zabbix_metrics := fmt.Sprintf("{\"host\":\"%s\",\"key\":\"%s.%s\",\"value\":\"%s\",\"clock\":%d}", host, opentsdb_key, strings.Join(key_extension, "."), value, timestamp.Unix())
 	output = []byte(zabbix_metrics)
+	if len(output) > ZABBIX_KEY_LENGTH_LIMIT {
+		err = fmt.Errorf("Zabbix key length limit reached: %s", zabbix_metrics)
+		return nil, err
+	}
 	return
 }
 
