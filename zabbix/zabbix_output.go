@@ -1,8 +1,9 @@
 package plugins
 
 import (
-	"bufio"
 	"bytes"
+	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -35,6 +36,8 @@ type ZabbixOutputConfig struct {
 	Encoder string `toml:"encoder"`
 	// Read deadline
 	ReadDeadline uint `toml:"read_deadline"`
+	// Override hostname
+	OverrideHostname string `toml:"override_hostname"`
 }
 
 func (zo *ZabbixOutput) ConfigStruct() interface{} {
@@ -42,7 +45,7 @@ func (zo *ZabbixOutput) ConfigStruct() interface{} {
 		Encoder:                  "OpentsdbToZabbix",
 		TickerInterval:           uint(15),
 		ZabbixChecksPollInterval: uint(360),
-		ReadDeadline:             uint(5),
+		ReadDeadline:             uint(3),
 	}
 }
 
@@ -50,7 +53,11 @@ func (zo *ZabbixOutput) Init(config interface{}) (err error) {
 	zo.conf = config.(*ZabbixOutputConfig)
 
 	zo.address, err = net.ResolveTCPAddr("tcp", zo.conf.Address)
-	zo.hostname, err = os.Hostname()
+	if zo.conf.OverrideHostname != "" {
+		zo.hostname = zo.conf.OverrideHostname
+	} else {
+		zo.hostname, err = os.Hostname()
+	}
 	zo.key_filter = make(map[string][]string)
 
 	return
@@ -69,6 +76,18 @@ func (zo *ZabbixOutput) cleanupConn() {
 	}
 }
 
+type activeCheckKeyJson struct {
+	Key         string `json:"key"`
+	Delay       string `json:"delay"`
+	Lastlogsize string `json:"lastlogsize"`
+	Mtime       string `json:"mtime"`
+}
+
+type activeCheckResponseJson struct {
+	Response string               `json:"response"`
+	Data     []activeCheckKeyJson `json:"Data"`
+}
+
 func (zo *ZabbixOutput) FetchActiveChecks(hostList []string) (err error) {
 	if zo.connection == nil {
 		if err = zo.connect(); err != nil {
@@ -78,23 +97,39 @@ func (zo *ZabbixOutput) FetchActiveChecks(hostList []string) (err error) {
 	}
 
 	for _, host := range hostList {
-		msg := fmt.Sprintf("{\"request\":\"active checks\",\"host\":\"%s\"", host)
+		msg := fmt.Sprintf("{\"request\":\"active checks\",\"host\":\"%s\"}", host)
 		data := []byte(msg)
-		var result string
-		if result, err = zo.zabbixSend(data); err != nil {
+
+		if err = zo.zabbixSend(data); err != nil {
 			return
 		} else {
-			fmt.Print(result)
+			var result []byte
+			if result, err = zo.zabbixReceive(); err != nil {
+				return
+			} else {
+				// Parse json for key names
+				var unmarshalledResult activeCheckResponseJson
+				err = json.Unmarshal(result, &unmarshalledResult)
+				if err != nil {
+					return
+				}
+
+				// Push key names for the current host
+				zo.key_filter[host] = make([]string, len(unmarshalledResult.Data))
+				for i, activeCheckKey := range unmarshalledResult.Data {
+					zo.key_filter[host][i] = activeCheckKey.Key
+				}
+			}
 		}
 	}
 
 	return
 }
 
-func (zo *ZabbixOutput) zabbixSend(data []byte) (result string, err error) {
+func (zo *ZabbixOutput) zabbixSend(data []byte) (err error) {
 	zbxHeader := []byte("ZBXD\x01")
-	// zabbix header + 2 uint
-	zbxHeaderLength := len(zbxHeader) + 2
+	// zabbix header + proto version + uint64 length
+	zbxHeaderLength := len(zbxHeader) + 8
 
 	dataLength := len(data)
 
@@ -102,9 +137,15 @@ func (zo *ZabbixOutput) zabbixSend(data []byte) (result string, err error) {
 
 	msgSlice := msgArray[0:0]
 	msgSlice = append(msgSlice, zbxHeader...)
-	msgSlice = append(msgSlice, byte(uint(dataLength)))
-	msgSlice = append(msgSlice, byte(uint(0)))
+
+	byteBuff := make([]byte, 8)
+
+	binary.LittleEndian.PutUint64(byteBuff, uint64(dataLength))
+	msgSlice = append(msgSlice, byteBuff...)
+
 	msgSlice = append(msgSlice, data...)
+
+	fmt.Println(string(msgSlice))
 
 	var n int
 	if n, err = zo.connection.Write(msgSlice); err != nil {
@@ -113,16 +154,44 @@ func (zo *ZabbixOutput) zabbixSend(data []byte) (result string, err error) {
 	} else if n != len(msgSlice) {
 		zo.cleanupConn()
 		err = fmt.Errorf("truncated output to: %s", zo.conf.Address)
-	} else {
-		// Get the response!
-
-		zo.connection.SetReadDeadline(time.Now().Add(time.Duration(zo.conf.ReadDeadline) * time.Second))
-
-		buff := make([]byte, 10240)
-		if _, err := bufio.NewReader(zo.connection).Read(buff); err == nil || err == io.EOF {
-			result = string(buff)
-		}
 	}
+
+	return
+}
+
+func (zo *ZabbixOutput) zabbixReceive() (result []byte, err error) {
+	// Get the response!
+	zo.connection.SetReadDeadline(time.Now().Add(time.Duration(zo.conf.ReadDeadline) * time.Second))
+
+	// Fetch the header first to get the full length
+	header := make([]byte, 13)
+	//var header_length int
+	if _, err = io.ReadFull(zo.connection, header); err != nil {
+		return
+	}
+
+	// Check header content
+	if string(header[:5]) != "ZBXD\x01" {
+		err = fmt.Errorf("Unexpected response header from Zabbix: %s %d %s", string(header[:5]), len(header[:5]), header[:5])
+		return
+	}
+
+	// Get length from zabbix protocol
+	response_length := binary.LittleEndian.Uint64(header[5:13])
+
+	// Get full reponse
+	response := make([]byte, response_length)
+	var n int
+	if n, err = io.ReadFull(zo.connection, response); err != nil {
+		return
+	}
+
+	if n != int(response_length) {
+		err = fmt.Errorf("Unexpected response length from Zabbix header: %s", response_length)
+		return
+	}
+
+	result = response
 
 	return
 }
@@ -149,8 +218,9 @@ func (zo *ZabbixOutput) SendRecords(records [][]byte) (err error) {
 	msgSlice = append(msgSlice, joinedRecords...)
 	msgSlice = append(msgSlice, msgClose...)
 
-	zo.connection.SetReadDeadline(time.Now())
-	_, err = zo.zabbixSend(msgSlice)
+	//zo.connection.SetReadDeadline(time.Now())
+	err = zo.zabbixSend(msgSlice)
+	zo.cleanupConn()
 
 	return
 }
@@ -191,26 +261,66 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 				break
 			}
 
-			err = zo.FetchActiveChecks(hostList)
+			if localErr := zo.FetchActiveChecks(hostList); localErr != nil {
+				// FIXME: What to do when zabbix doesn't answer?
+				or.LogError(fmt.Errorf("Zabbix server enable to provide active check list: %s", localErr))
+			}
 		case pack, ok = <-inChan:
 			if !ok {
 				break
 			}
 
-			if len(dataSlice) >= int(zo.conf.MaxKeyCount) {
-				if err = zo.SendRecords(dataSlice); err == nil {
-					//FIXME: Overflow control
-					dataSlice = dataArray[0:0]
-				} else {
-					ok = false
+			var (
+				val   interface{}
+				key   string
+				host  string
+				found bool
+			)
+
+			if val, found = pack.Message.GetFieldValue("ZabbixKey"); !found {
+				or.LogError(fmt.Errorf("No ZabbixKey in message"))
+				pack.Recycle()
+				continue
+			}
+			key, _ = val.(string)
+
+			if val, found = pack.Message.GetFieldValue("Host"); !found {
+				or.LogError(fmt.Errorf("No ZabbixKey in message"))
+				pack.Recycle()
+				continue
+			}
+			host, _ = val.(string)
+
+			// Check against active check filter
+			found = false
+			for _, filtered_key := range zo.key_filter[host] {
+				if key == filtered_key {
+					found = true
+					break
 				}
 			}
 
+			if !found {
+				fmt.Print("Discarding\n")
+				fmt.Printf("%s", zo.key_filter)
+				break
+			}
+
 			//FIXME: Add additional hostnames in list
-			if msg, err := or.Encode(pack); err == nil {
+			if msg, localErr := or.Encode(pack); localErr == nil {
 				dataSlice = append(dataSlice, msg)
 			} else {
-				ok = false
+				or.LogError(fmt.Errorf("Encoder failure: %s", localErr))
+			}
+
+			if len(dataSlice) >= int(zo.conf.MaxKeyCount) {
+				if localErr := zo.SendRecords(dataSlice); localErr == nil {
+					//FIXME: Overflow control
+					dataSlice = dataArray[0:0]
+				} else {
+					// FIXME: What to do when zabbix doesn't answer?
+					or.LogError(fmt.Errorf("Zabbix server to accept data: %s", localErr))
+				}
 			}
 
 			pack.Recycle()
@@ -218,11 +328,12 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 		case <-ticker:
 			if len(dataSlice) > 0 {
 				// Remove trailling coma
-				if err = zo.SendRecords(dataSlice); err == nil {
+				if localErr := zo.SendRecords(dataSlice); localErr == nil {
 					//FIXME: Overflow control
 					dataSlice = dataArray[0:0]
 				} else {
-					ok = false
+					// FIXME: What to do when zabbix doesn't answer?
+					or.LogError(fmt.Errorf("Zabbix server to accept data: %s", localErr))
 				}
 			}
 		}
