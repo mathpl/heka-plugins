@@ -1,0 +1,38 @@
+[hekad]
+base_dir="base_heka"
+share_dir="share_heka"
+
+[tcp:4242]
+type = "TcpInput"
+parser_type = "token"
+delimiter = "\n"
+address = "localhost:4242"
+decoder = "tsd_decoder"
+
+[tsd_decoder]
+type="OpenTsdbRawDecoder"
+
+[tsd_encoder]
+type = "OpenTsdbRawEncoder"
+
+[zabbix_encoder]
+type = "OpenTsdbToZabbixEncoder"
+
+[OpentsdbZabbixFilter]
+#address = "zabbix.tm.tmcs:10051"
+message_matcher = "Type == 'opentsdb'"
+
+[opentsd]
+type = "TcpOutput"
+address = "127.0.0.1:4243"
+encoder = "tsd_encoder"
+message_matcher = "Type == 'opentsdb'"
+
+[zabbix]
+type = "ZabbixOutput"
+ticker_interval = 5
+max_key_count = 100
+receive_timeout = 5000
+address = "zabbix:10051"
+encoder = "zabbix_encoder"
+message_matcher = "Type == 'zabbix'"
