@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"time"
 
 	. "github.com/mozilla-services/heka/pipeline"
@@ -13,11 +14,14 @@ import (
 
 // Output plugin that sends messages via TCP using the Heka protocol.
 type ZabbixOutput struct {
-	conf       *ZabbixOutputConfig
-	address    *net.TCPAddr
-	connection net.Conn
-	hostname   string
-	key_filter map[string][]string
+	conf        *ZabbixOutputConfig
+	hostname    string
+	key_filter  map[string]*hostActiveChecks
+	zabbix_conn *ZabbixConn
+}
+
+type hostActiveChecks struct {
+	keys map[string]uint16
 }
 
 // ConfigStruct for ZabbixOutputstruct plugin.
@@ -32,8 +36,8 @@ type ZabbixOutputConfig struct {
 	MaxKeyCount uint `toml:"max_key_count"`
 	// Encoder to use
 	Encoder string `toml:"encoder"`
-	// Read deadline
-	ReadDeadline uint `toml:"read_deadline"`
+	// Read deadline in ms
+	ReceiveTimeout uint `toml:"receive_timeout"`
 	// Override hostname
 	OverrideHostname string `toml:"override_hostname"`
 }
@@ -43,83 +47,29 @@ func (zo *ZabbixOutput) ConfigStruct() interface{} {
 		Encoder:                  "OpentsdbToZabbix",
 		TickerInterval:           uint(15),
 		ZabbixChecksPollInterval: uint(360),
-		ReadDeadline:             uint(3),
+		ReceiveTimeout:           uint(3),
 	}
 }
 
 func (zo *ZabbixOutput) Init(config interface{}) (err error) {
 	zo.conf = config.(*ZabbixOutputConfig)
 
-	zo.address, err = net.ResolveTCPAddr("tcp", zo.conf.Address)
+	var zc ZabbixConn
+	zc.addr, err = net.ResolveTCPAddr("tcp", zo.conf.Address)
 	if zo.conf.OverrideHostname != "" {
 		zo.hostname = zo.conf.OverrideHostname
 	} else {
 		zo.hostname, err = os.Hostname()
 	}
-	zo.key_filter = make(map[string][]string)
-
-	return
-}
-
-func (zo *ZabbixOutput) connect() (err error) {
-	dialer := &net.Dialer{}
-	zo.connection, err = dialer.Dial("tcp", zo.address.String())
-	return err
-}
-
-func (zo *ZabbixOutput) cleanupConn() {
-	if zo.connection != nil {
-		zo.connection.Close()
-		zo.connection = nil
-	}
-}
-
-func (zo *ZabbixOutput) FetchActiveChecks(hostList []string) (err error) {
-	if zo.connection == nil {
-		if err = zo.connect(); err != nil {
-			zo.connection = nil
-			return
-		}
-	}
-
-	for _, host := range hostList {
-		msg := fmt.Sprintf("{\"request\":\"active checks\",\"host\":\"%s\"}", host)
-		data := []byte(msg)
-
-		if err = zo.ZabbixSend(data); err != nil {
-			return
-		} else {
-			var result []byte
-			if result, err = zo.ZabbixReceive(); err != nil {
-				return
-			} else {
-				// Parse json for key names
-				var unmarshalledResult ActiveCheckResponseJson
-				err = json.Unmarshal(result, &unmarshalledResult)
-				if err != nil {
-					return
-				}
-
-				// Push key names for the current host
-				zo.key_filter[host] = make([]string, len(unmarshalledResult.Data))
-				for i, activeCheckKey := range unmarshalledResult.Data {
-					zo.key_filter[host][i] = activeCheckKey.Key
-				}
-			}
-		}
-	}
+	zo.key_filter = make(map[string]*hostActiveChecks)
+	zc.receive_timeout = time.Duration(zo.conf.ReceiveTimeout) * time.Millisecond
+	zo.zabbix_conn = &zc
 
 	return
 }
 
 func (zo *ZabbixOutput) SendRecords(records [][]byte) (err error) {
-	if zo.connection == nil {
-		if err = zo.connect(); err != nil {
-			zo.connection = nil
-			return
-		}
-	}
-
+	//FIXME: Proper json encoding
 	msgHeader := []byte("{\"request\":\"agent data\",\"data\":[")
 	msgHeaderLength := len(msgHeader)
 
@@ -135,8 +85,51 @@ func (zo *ZabbixOutput) SendRecords(records [][]byte) (err error) {
 	msgSlice = append(msgSlice, msgClose...)
 
 	//zo.connection.SetReadDeadline(time.Now())
-	err = zo.ZabbixSend(msgSlice)
-	zo.cleanupConn()
+	err = zo.zabbix_conn.ZabbixSend(msgSlice)
+
+	return
+}
+
+func (zo *ZabbixOutput) FetchActiveChecks(hostList []string) (err error) {
+	for _, host := range hostList {
+		msg := fmt.Sprintf("{\"request\":\"active checks\",\"host\":\"%s\"}", host)
+		data := []byte(msg)
+
+		if err = zo.zabbix_conn.ZabbixSend(data); err != nil {
+			return
+		} else {
+			var result []byte
+			if result, err = zo.zabbix_conn.ZabbixReceive(); err != nil {
+				return
+			} else {
+				// Parse json for key names
+				var unmarshalledResult ActiveCheckResponseJson
+				//Check what's the result on no keys
+				fmt.Printf("%+V\n", result)
+				err = json.Unmarshal(result, &unmarshalledResult)
+				if err != nil {
+					return
+				}
+
+				//Clean up current list
+				key_filter := make(map[string]*hostActiveChecks, len(zo.key_filter))
+
+				// Push key names for the current host
+				for _, activeCheckKey := range unmarshalledResult.Data {
+					var hac hostActiveChecks
+					// Put 15 as delay if strconv doesn't work for now
+					if delay, conv_err := strconv.ParseInt(activeCheckKey.Delay, 10, 8); conv_err != nil {
+						hac.keys[activeCheckKey.Key] = uint16(delay)
+					} else {
+						hac.keys[activeCheckKey.Key] = 15
+					}
+					key_filter[host] = &hac
+				}
+
+				zo.key_filter = key_filter
+			}
+		}
+	}
 
 	return
 }
@@ -148,13 +141,6 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 		inChan = or.InChan()
 		ticker = or.Ticker()
 	)
-
-	defer func() {
-		if zo.connection != nil {
-			zo.connection.Close()
-			zo.connection = nil
-		}
-	}()
 
 	updateFilter := make(chan bool, 1)
 	go func() {
@@ -209,10 +195,9 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 
 			// Check against active check filter
 			found = false
-			for _, filtered_key := range zo.key_filter[host] {
-				if key == filtered_key {
+			if hac, found_host := zo.key_filter[host]; found_host {
+				if _, found_key := hac.keys[key]; found_key {
 					found = true
-					break
 				}
 			}
 
@@ -237,7 +222,6 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 					or.LogError(fmt.Errorf("Zabbix server to accept data: %s", localErr))
 				}
 			}
-
 			pack.Recycle()
 
 		case <-ticker:
