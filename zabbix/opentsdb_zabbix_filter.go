@@ -29,7 +29,6 @@ type OpentsdbZabbixFilter struct {
 	conf *OpentsdbZabbixFilterConfig
 }
 
-// StatFilter config struct.
 type OpentsdbZabbixFilterConfig struct {
 	// Sort tag by name before adding them at the end of the opentsdb key
 	// to create the Zabbix key

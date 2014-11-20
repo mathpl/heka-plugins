@@ -22,8 +22,6 @@ import (
 	"github.com/mozilla-services/heka/pipeline"
 )
 
-// OpenTsdbToZabbixEncoder generates a Zabbix compatible output from
-// an opentsdb decoded message.
 type OpenTsdbToZabbixEncoder struct {
 	config *OpenTsdbToZabbixEncoderConfig
 }

@@ -76,18 +76,6 @@ func (zo *ZabbixOutput) cleanupConn() {
 	}
 }
 
-type activeCheckKeyJson struct {
-	Key         string `json:"key"`
-	Delay       string `json:"delay"`
-	Lastlogsize string `json:"lastlogsize"`
-	Mtime       string `json:"mtime"`
-}
-
-type activeCheckResponseJson struct {
-	Response string               `json:"response"`
-	Data     []activeCheckKeyJson `json:"Data"`
-}
-
 func (zo *ZabbixOutput) FetchActiveChecks(hostList []string) (err error) {
 	if zo.connection == nil {
 		if err = zo.connect(); err != nil {
@@ -100,15 +88,15 @@ func (zo *ZabbixOutput) FetchActiveChecks(hostList []string) (err error) {
 		msg := fmt.Sprintf("{\"request\":\"active checks\",\"host\":\"%s\"}", host)
 		data := []byte(msg)
 
-		if err = zo.zabbixSend(data); err != nil {
+		if err = zo.ZabbixSend(data); err != nil {
 			return
 		} else {
 			var result []byte
-			if result, err = zo.zabbixReceive(); err != nil {
+			if result, err = zo.ZabbixReceive(); err != nil {
 				return
 			} else {
 				// Parse json for key names
-				var unmarshalledResult activeCheckResponseJson
+				var unmarshalledResult ActiveCheckResponseJson
 				err = json.Unmarshal(result, &unmarshalledResult)
 				if err != nil {
 					return
@@ -126,7 +114,7 @@ func (zo *ZabbixOutput) FetchActiveChecks(hostList []string) (err error) {
 	return
 }
 
-func (zo *ZabbixOutput) zabbixSend(data []byte) (err error) {
+func (zo *ZabbixOutput) ZabbixSend(data []byte) (err error) {
 	zbxHeader := []byte("ZBXD\x01")
 	// zabbix header + proto version + uint64 length
 	zbxHeaderLength := len(zbxHeader) + 8
@@ -157,7 +145,7 @@ func (zo *ZabbixOutput) zabbixSend(data []byte) (err error) {
 	return
 }
 
-func (zo *ZabbixOutput) zabbixReceive() (result []byte, err error) {
+func (zo *ZabbixOutput) ZabbixReceive() (result []byte, err error) {
 	// Get the response!
 	zo.connection.SetReadDeadline(time.Now().Add(time.Duration(zo.conf.ReadDeadline) * time.Second))
 
@@ -217,7 +205,7 @@ func (zo *ZabbixOutput) SendRecords(records [][]byte) (err error) {
 	msgSlice = append(msgSlice, msgClose...)
 
 	//zo.connection.SetReadDeadline(time.Now())
-	err = zo.zabbixSend(msgSlice)
+	err = zo.ZabbixSend(msgSlice)
 	zo.cleanupConn()
 
 	return
