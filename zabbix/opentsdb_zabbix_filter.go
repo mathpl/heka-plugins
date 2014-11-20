@@ -16,26 +16,28 @@ package plugins
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/mozilla-services/heka/message"
 	. "github.com/mozilla-services/heka/pipeline"
 )
 
-// Heka Filter plugin that can accept specific message types, extract data
-// from those messages, and from that data generate statsd messages in a
-// StatsdInput exactly as if a statsd message has come from a networked statsd
-// client.
+const ZABBIX_KEY_LENGTH_LIMIT = 255
+
 type OpentsdbZabbixFilter struct {
 	conf *OpentsdbZabbixFilterConfig
 }
 
 // StatFilter config struct.
 type OpentsdbZabbixFilterConfig struct {
+	// Sort tag by name before adding them at the end of the opentsdb key
+	// to create the Zabbix key
+	SortTags bool
 }
 
 func (ozf *OpentsdbZabbixFilter) ConfigStruct() interface{} {
-	return &OpentsdbZabbixFilterConfig{}
+	return &OpentsdbZabbixFilterConfig{SortTags: true}
 }
 
 func (ozf *OpentsdbZabbixFilter) Init(config interface{}) (err error) {
@@ -64,6 +66,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 
 		fields := pack.Message.GetFields()
 		var host string
+		var value string
 		var key_extension []string
 		for _, field := range fields {
 			k := field.GetName()
@@ -72,7 +75,19 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 			case "host":
 				host = v.(string)
 			case "Value":
-				break
+				switch vt := v.(type) {
+				case string:
+					value = vt
+				case int:
+				case int64:
+					value = fmt.Sprintf("%d", vt)
+				case float32:
+				case float64:
+					value = fmt.Sprintf("%f", vt)
+				default:
+					err = fmt.Errorf("Unexpected Value type %+V", v)
+					break
+				}
 			case "Metric":
 				if vs, ok := v.(string); ok {
 					opentsdb_key = vs
@@ -83,7 +98,8 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 			default:
 				if vs, ok := v.(string); ok {
 					//FIXME: Less append, more correct sizing from start
-					key_extension = append(key_extension, k, vs)
+					key_part := fmt.Sprintf("%s.%s", k, vs)
+					key_extension = append(key_extension, key_part)
 				} else {
 					err = fmt.Errorf("Unexpected Tag type %+V", v)
 					break
@@ -91,35 +107,55 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 			}
 		}
 
+		if ozf.conf.SortTags {
+			sort.Strings(key_extension)
+		}
+
 		if host == "" {
 			//FIXME: Add default in plugin
 			err = fmt.Errorf("Unable to find host tag in message.")
-			pack.Recycle()
+			pack2.Recycle()
 			continue
 		}
 
 		if opentsdb_key == "" {
 			err = fmt.Errorf("Unable to find Metric field in message.")
-			pack.Recycle()
+			pack2.Recycle()
 			continue
 		}
 
-		// Patch in zabbix data so we don't process it 2 times
-		zabbix_key := fmt.Sprintf("%s.%s", opentsdb_key, strings.Join(key_extension, "."))
-		var field *message.Field
-		if field, err = message.NewField("ZabbixKey", zabbix_key, ""); err != nil {
-			err = fmt.Errorf("Unable to add Zabbix Key: %s", err)
-			pack.Recycle()
+		zabbix_key := strings.Join(append([]string{opentsdb_key.(string)}, key_extension...), ".")
+		if len(zabbix_key) > ZABBIX_KEY_LENGTH_LIMIT {
+			err = fmt.Errorf("Zabbix Key length exceded: %s", zabbix_key)
+			pack2.Recycle()
 			continue
 		}
-		pack.Message.AddField(field)
+
+		var field *message.Field
+		if field, err = message.NewField("Key", zabbix_key, ""); err != nil {
+			err = fmt.Errorf("Unable to add Zabbix Key: %s", err)
+			pack2.Recycle()
+			continue
+		}
+		pack2.Message.AddField(field)
 
 		if field, err = message.NewField("Host", host, ""); err != nil {
 			err = fmt.Errorf("Unable to add host: %s", err)
-			pack.Recycle()
+			pack2.Recycle()
 			continue
 		}
-		pack.Message.AddField(field)
+		pack2.Message.AddField(field)
+
+		if field, err = message.NewField("Value", value, ""); err != nil {
+			err = fmt.Errorf("Unable to add value: %s", err)
+			pack2.Recycle()
+			continue
+		}
+		pack2.Message.AddField(field)
+
+		pack2.Message.SetType("zabbix")
+
+		fr.Inject(pack2)
 	}
 
 	return

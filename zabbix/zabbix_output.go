@@ -145,8 +145,6 @@ func (zo *ZabbixOutput) zabbixSend(data []byte) (err error) {
 
 	msgSlice = append(msgSlice, data...)
 
-	fmt.Println(string(msgSlice))
-
 	var n int
 	if n, err = zo.connection.Write(msgSlice); err != nil {
 		zo.cleanupConn()
@@ -277,15 +275,15 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 				found bool
 			)
 
-			if val, found = pack.Message.GetFieldValue("ZabbixKey"); !found {
-				or.LogError(fmt.Errorf("No ZabbixKey in message"))
+			if val, found = pack.Message.GetFieldValue("Key"); !found {
+				or.LogError(fmt.Errorf("No Key in message"))
 				pack.Recycle()
 				continue
 			}
 			key, _ = val.(string)
 
 			if val, found = pack.Message.GetFieldValue("Host"); !found {
-				or.LogError(fmt.Errorf("No ZabbixKey in message"))
+				or.LogError(fmt.Errorf("No Host in message"))
 				pack.Recycle()
 				continue
 			}
@@ -301,8 +299,7 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 			}
 
 			if !found {
-				fmt.Print("Discarding\n")
-				fmt.Printf("%s", zo.key_filter)
+				fmt.Printf("Discarding: %s:%s\n", host, key)
 				break
 			}
 

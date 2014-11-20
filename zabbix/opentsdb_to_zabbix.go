@@ -15,14 +15,12 @@
 package plugins
 
 import (
+	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/mozilla-services/heka/pipeline"
 )
-
-const ZABBIX_KEY_LENGTH_LIMIT = 255
 
 // OpenTsdbToZabbixEncoder generates a Zabbix compatible output from
 // an opentsdb decoded message.
@@ -31,6 +29,13 @@ type OpenTsdbToZabbixEncoder struct {
 }
 
 type OpenTsdbToZabbixEncoderConfig struct {
+}
+
+type zabbixMetricJson struct {
+	Host  string
+	Key   string
+	Value string
+	Clock string
 }
 
 func (oze *OpenTsdbToZabbixEncoder) ConfigStruct() interface{} {
@@ -43,83 +48,42 @@ func (oze *OpenTsdbToZabbixEncoder) Init(config interface{}) (err error) {
 	return
 }
 
+func fieldToString(fieldName string, pack *pipeline.PipelinePack) (val string, err error) {
+	var (
+		tmp interface{}
+		ok  bool
+	)
+
+	if tmp, ok = pack.Message.GetFieldValue(fieldName); !ok {
+		err = fmt.Errorf("Unable to find fieldname: %s", fieldName)
+		return
+	}
+
+	if val, ok = tmp.(string); !ok {
+		err = fmt.Errorf("Unable to cast field to string: %s", fieldName)
+		return
+	}
+
+	return
+}
+
 func (oe *OpenTsdbToZabbixEncoder) Encode(pack *pipeline.PipelinePack) (output []byte, err error) {
-	opentsdb_key, ok := pack.Message.GetFieldValue("Metric")
-	if !ok {
-		err = fmt.Errorf("Unable to find Field[\"Metric\"] field in message, make sure it's been decoded by OpenstdbRawDecoder.")
+	var zm zabbixMetricJson
+
+	zm.Clock = fmt.Sprintf("%d", time.Unix(0, pack.Message.GetTimestamp()).UTC().Unix())
+
+	if zm.Key, err = fieldToString("Key", pack); err != nil {
+		return nil, err
+	}
+	if zm.Host, err = fieldToString("Host", pack); err != nil {
+		return nil, err
+	}
+	if zm.Value, err = fieldToString("Value", pack); err != nil {
 		return nil, err
 	}
 
-	fields := pack.Message.GetFields()
+	output, err = json.Marshal(zm)
 
-	var host string
-	var value string
-	var key_extension []string
-	for _, field := range fields {
-		k := field.GetName()
-		v := field.GetValue()
-		switch k {
-		case "host":
-			host = v.(string)
-		case "Value":
-			switch vt := v.(type) {
-			case string:
-				value = vt
-			case int:
-			case int64:
-				value = fmt.Sprintf("%d", vt)
-			case float32:
-			case float64:
-				value = fmt.Sprintf("%f", vt)
-			default:
-				err = fmt.Errorf("Unexpected Value type %+V", v)
-				return nil, err
-			}
-		case "Metric":
-			if vs, ok := v.(string); ok {
-				opentsdb_key = vs
-			} else {
-				err = fmt.Errorf("Unexpected Metric type %+V", v)
-				return nil, err
-			}
-		default:
-			if vs, ok := v.(string); ok {
-				//FIXME: Less append, more correct sizing from start
-				key_extension = append(key_extension, k, vs)
-			} else {
-				err = fmt.Errorf("Unexpected Tag type %+V", v)
-				return nil, err
-			}
-		}
-	}
-
-	timestamp := time.Unix(0, pack.Message.GetTimestamp()).UTC()
-
-	if host == "" {
-		//FIXME: Add default in plugin
-		err = fmt.Errorf("Unable to find host tag in message.")
-		return nil, err
-	}
-
-	if opentsdb_key == "" {
-		//FIXME: Add default in plugin
-		err = fmt.Errorf("Unable to find Metric field in message.")
-		return nil, err
-	}
-
-	if value == "" {
-		//FIXME: Add default in plugin
-		err = fmt.Errorf("Unable to find Value field in message.")
-		return nil, err
-	}
-
-	// FIXME: real json encoding
-	zabbix_metrics := fmt.Sprintf("{\"host\":\"%s\",\"key\":\"%s.%s\",\"value\":\"%s\",\"clock\":%d}", host, opentsdb_key, strings.Join(key_extension, "."), value, timestamp.Unix())
-	output = []byte(zabbix_metrics)
-	if len(output) > ZABBIX_KEY_LENGTH_LIMIT {
-		err = fmt.Errorf("Zabbix key length limit reached: %s", zabbix_metrics)
-		return nil, err
-	}
 	return
 }
 
