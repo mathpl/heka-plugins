@@ -9,6 +9,8 @@ Heka plugins:
 hekad.tmol: example of a config send both the data to openstdb unfiltered and to zabbix with filter from a single opentsdb input.
 
 Add this in your heka base directory:
+
 add_external_plugin(git https://github.com/hynd/heka-tsutils-plugins master __ignore_root statsd opentsdb)
+
 add_external_plugin(git git@git.tm.tmcs:mathieu.payeur/heka-plugins.git master __ignore_root zabbix)
 
