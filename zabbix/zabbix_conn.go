@@ -2,28 +2,38 @@ package plugins
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"time"
 )
 
 type ActiveCheckKeyJson struct {
-	Key         string `json:"key"`
-	Delay       string `json:"delay"`
-	Lastlogsize string `json:"lastlogsize"`
-	Mtime       string `json:"mtime"`
+	Key string `json:"key"`
+
+	//Zabbix 1.8 return these as string, 2+ as int.
+	Delay       interface{} `json:"delay"`
+	Lastlogsize interface{} `json:"lastlogsize"`
+	Mtime       interface{} `json:"mtime"`
 }
 
 type ActiveCheckResponseJson struct {
 	Response string               `json:"response"`
-	Data     []ActiveCheckKeyJson `json:"Data"`
+	Data     []ActiveCheckKeyJson `json:"data"`
 }
 
 type ZabbixConn struct {
 	conn            net.Conn
 	addr            *net.TCPAddr
 	receive_timeout time.Duration
+}
+
+func NewZabbixConn(addr string, receive_timeout uint) (zc ZabbixConn, err error) {
+	zc.addr, err = net.ResolveTCPAddr("tcp", addr)
+	zc.receive_timeout = time.Duration(receive_timeout) * time.Millisecond
+	return
 }
 
 func (zc *ZabbixConn) getConn() (err error) {
@@ -49,7 +59,6 @@ func (zc *ZabbixConn) ZabbixSend(data []byte) (err error) {
 	if zc.conn == nil || err != nil {
 		return
 	}
-	defer zc.cleanupConn()
 
 	zbxHeader := []byte("ZBXD\x01")
 	// zabbix header + proto version + uint64 length
@@ -72,10 +81,8 @@ func (zc *ZabbixConn) ZabbixSend(data []byte) (err error) {
 	var n int
 	if n, err = zc.conn.Write(msgSlice); err != nil {
 		zc.cleanupConn()
-		err = fmt.Errorf("writing to %s: %s", zc.addr.String(), err)
 	} else if n != len(msgSlice) {
 		zc.cleanupConn()
-		err = fmt.Errorf("truncated output to: %s", zc.addr.String())
 	}
 
 	return
@@ -94,7 +101,8 @@ func (zc *ZabbixConn) ZabbixReceive() (result []byte, err error) {
 	// Fetch the header first to get the full length
 	header := make([]byte, 13)
 	//var header_length int
-	if _, err = io.ReadFull(zc.conn, header); err != nil {
+	var n int
+	if n, err = io.ReadFull(zc.conn, header); err != nil {
 		return
 	}
 
@@ -107,9 +115,10 @@ func (zc *ZabbixConn) ZabbixReceive() (result []byte, err error) {
 	// Get length from zabbix protocol
 	response_length := binary.LittleEndian.Uint64(header[5:13])
 
+	zc.conn.SetReadDeadline(time.Now().Add(zc.receive_timeout))
+
 	// Get full reponse
 	response := make([]byte, response_length)
-	var n int
 	if n, err = io.ReadFull(zc.conn, response); err != nil {
 		return
 	}
@@ -120,6 +129,46 @@ func (zc *ZabbixConn) ZabbixReceive() (result []byte, err error) {
 	}
 
 	result = response
+
+	return
+}
+
+func (zc *ZabbixConn) FetchActiveChecks(host string) (hac HostActiveChecks, err error) {
+	msg := fmt.Sprintf("{\"request\":\"active checks\",\"host\":\"%s\"}", host)
+	data := []byte(msg)
+
+	hac.Keys = make(map[string]int, 1)
+
+	if err = zc.ZabbixSend(data); err != nil {
+		return
+	} else {
+		var result []byte
+		if result, err = zc.ZabbixReceive(); err != nil {
+			return
+		} else {
+			// Parse json for key names
+			var unmarshalledResult ActiveCheckResponseJson
+			//Check what's the result on no keys
+			err = json.Unmarshal(result, &unmarshalledResult)
+			if err != nil {
+				return
+			}
+
+			// Push key names for the current host
+			for _, activeCheckKey := range unmarshalledResult.Data {
+				if fDelay, ok := activeCheckKey.Delay.(float64); ok {
+					hac.Keys[activeCheckKey.Key] = int(fDelay)
+				} else if sDelay, ok := activeCheckKey.Delay.(string); ok {
+					// Put 15 as delay if strconv doesn't work for now
+					if delay, conv_err := strconv.ParseInt(sDelay, 10, 32); conv_err != nil {
+						hac.Keys[activeCheckKey.Key] = 15
+					} else {
+						hac.Keys[activeCheckKey.Key] = int(delay)
+					}
+				}
+			}
+		}
+	}
 
 	return
 }
