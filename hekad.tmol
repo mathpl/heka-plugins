@@ -31,8 +31,13 @@ message_matcher = "Type == 'opentsdb'"
 [zabbix]
 type = "ZabbixOutput"
 ticker_interval = 5
-max_key_count = 100
-receive_timeout = 5000
-address = "zabbix:10051"
+send_key_count = 3
+max_key_count = 10
+receive_timeout = 500
+#address = "zabbix.tm.tmcs:10051"
+address = "192.168.56.101:10051"
+zabbix_checks_poll_interval=10
 encoder = "zabbix_encoder"
+override_hostname= "testhost"
+#override_hostname= "mgr1.mf.ams2.coresys.tmcs"
 message_matcher = "Type == 'zabbix'"
