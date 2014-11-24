@@ -213,7 +213,7 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 					or.LogError(fmt.Errorf("Zabbix server unable to provide active check list for host %s: %s", host, localErr))
 				} else {
 					zo.key_filter[host] = &hac
-					fmt.Printf("%s\n%+V\n", host, hac.Keys)
+					//fmt.Printf("%s\n%+V\n", host, hac.Keys)
 				}
 			}
 
