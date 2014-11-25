@@ -46,7 +46,7 @@ func (zo *ZabbixOutput) ConfigStruct() interface{} {
 	return &ZabbixOutputConfig{
 		Encoder:                  "OpentsdbToZabbix",
 		TickerInterval:           uint(15),
-		ZabbixChecksPollInterval: uint(360),
+		ZabbixChecksPollInterval: uint(300),
 		ReceiveTimeout:           uint(3),
 		SendTimeout:              uint(1),
 		SendKeyCount:             uint(1000),

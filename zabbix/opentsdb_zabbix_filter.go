@@ -26,13 +26,16 @@ import (
 const ZABBIX_KEY_LENGTH_LIMIT = 255
 
 type OpentsdbZabbixFilter struct {
-	conf *OpentsdbZabbixFilterConfig
+	conf       *OpentsdbZabbixFilterConfig
+	strip_tags map[string]bool
 }
 
 type OpentsdbZabbixFilterConfig struct {
 	// Sort tag by name before adding them at the end of the opentsdb key
 	// to create the Zabbix key
-	SortTags bool
+	SortTags bool `toml:"sort_tags"`
+	// List of string to omit from Zabbix key creation
+	StripTags []string `toml:"strip_tags"`
 }
 
 func (ozf *OpentsdbZabbixFilter) ConfigStruct() interface{} {
@@ -41,6 +44,10 @@ func (ozf *OpentsdbZabbixFilter) ConfigStruct() interface{} {
 
 func (ozf *OpentsdbZabbixFilter) Init(config interface{}) (err error) {
 	ozf.conf = config.(*OpentsdbZabbixFilterConfig)
+	ozf.strip_tags = make(map[string]bool, len(ozf.conf.StripTags))
+	for _, tag := range ozf.conf.StripTags {
+		ozf.strip_tags[tag] = true
+	}
 	return
 }
 
@@ -71,6 +78,11 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 		var key_extension []string
 		for _, field := range fields {
 			k := field.GetName()
+			if _, found := ozf.strip_tags[k]; found {
+				//Stripped tag, do not process
+				continue
+			}
+
 			v := field.GetValue()
 			switch k {
 			case "host":
