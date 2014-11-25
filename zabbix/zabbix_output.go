@@ -36,6 +36,8 @@ type ZabbixOutputConfig struct {
 	Encoder string `toml:"encoder"`
 	// Read deadline in ms
 	ReceiveTimeout uint `toml:"receive_timeout"`
+	// Write deadline in ms
+	SendTimeout uint `toml:"send_timeout"`
 	// Override hostname
 	OverrideHostname string `toml:"override_hostname"`
 }
@@ -46,6 +48,7 @@ func (zo *ZabbixOutput) ConfigStruct() interface{} {
 		TickerInterval:           uint(15),
 		ZabbixChecksPollInterval: uint(360),
 		ReceiveTimeout:           uint(3),
+		SendTimeout:              uint(1),
 		SendKeyCount:             uint(1000),
 		MaxKeyCount:              uint(2000),
 	}
@@ -54,7 +57,7 @@ func (zo *ZabbixOutput) ConfigStruct() interface{} {
 func (zo *ZabbixOutput) Init(config interface{}) (err error) {
 	zo.conf = config.(*ZabbixOutputConfig)
 
-	zo.zabbix_conn, err = NewZabbixConn(zo.conf.Address, zo.conf.ReceiveTimeout)
+	zo.zabbix_conn, err = NewZabbixConn(zo.conf.Address, zo.conf.ReceiveTimeout, zo.conf.SendTimeout)
 	zo.key_filter = make(map[string]*HostActiveChecks)
 	if zo.conf.OverrideHostname != "" {
 		zo.key_filter[zo.conf.OverrideHostname] = nil
@@ -77,6 +80,8 @@ func (zo *ZabbixOutput) Init(config interface{}) (err error) {
 }
 
 func (zo *ZabbixOutput) SendRecords(records [][]byte) (data_left [][]byte, err error) {
+	defer zo.zabbix_conn.cleanupConn()
+
 	//FIXME: Proper json encoding
 	msgHeader := []byte("{\"request\":\"agent data\",\"data\":[")
 	msgHeaderLength := len(msgHeader)
@@ -88,7 +93,6 @@ func (zo *ZabbixOutput) SendRecords(records [][]byte) (data_left [][]byte, err e
 
 	for len(data_left) > 0 {
 		length := 0
-		fmt.Printf("Data left: %d\n", len(data_left))
 		if len(data_left) >= int(zo.conf.SendKeyCount) {
 			length = int(zo.conf.SendKeyCount)
 		} else {
@@ -103,12 +107,12 @@ func (zo *ZabbixOutput) SendRecords(records [][]byte) (data_left [][]byte, err e
 		msgSlice = append(msgSlice, joinedRecords...)
 		msgSlice = append(msgSlice, msgClose...)
 
-		fmt.Printf("SENDING LEN: %d\n", length)
-		fmt.Printf("SENDING: %s\n", string(msgSlice))
-
 		if err = zo.zabbix_conn.ZabbixSend(msgSlice); err != nil {
 			return data_left, err
 		}
+
+		// Disconnect between batches
+		zo.zabbix_conn.cleanupConn()
 
 		// Move down the slice
 		data_left = data_left[length:]
@@ -224,13 +228,16 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 
 			if discard, err := zo.Filter(pack); err != nil {
 				or.LogError(err)
+				pack.Recycle()
 				continue
 			} else if discard {
+				pack.Recycle()
 				continue
 			}
 
 			if msg, localErr := or.Encode(pack); localErr != nil {
 				or.LogError(fmt.Errorf("Encoder failure: %s", localErr))
+				pack.Recycle()
 				continue
 			} else {
 				dataSlice = append(dataSlice, msg)

@@ -28,11 +28,13 @@ type ZabbixConn struct {
 	conn            net.Conn
 	addr            *net.TCPAddr
 	receive_timeout time.Duration
+	send_timeout    time.Duration
 }
 
-func NewZabbixConn(addr string, receive_timeout uint) (zc ZabbixConn, err error) {
+func NewZabbixConn(addr string, receive_timeout uint, send_timeout uint) (zc ZabbixConn, err error) {
 	zc.addr, err = net.ResolveTCPAddr("tcp", addr)
 	zc.receive_timeout = time.Duration(receive_timeout) * time.Millisecond
+	zc.send_timeout = time.Duration(send_timeout) * time.Millisecond
 	return
 }
 
@@ -78,11 +80,11 @@ func (zc *ZabbixConn) ZabbixSend(data []byte) (err error) {
 
 	msgSlice = append(msgSlice, data...)
 
+	zc.conn.SetWriteDeadline(time.Now().Add(zc.send_timeout * time.Second))
+
 	var n int
-	if n, err = zc.conn.Write(msgSlice); err != nil {
-		zc.cleanupConn()
-	} else if n != len(msgSlice) {
-		zc.cleanupConn()
+	if n, err = zc.conn.Write(msgSlice); n != len(msgSlice) {
+		err = fmt.Errorf("Full message not send, only %d of %b bytes", n, len(msgSlice))
 	}
 
 	return

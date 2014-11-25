@@ -22,26 +22,26 @@ import (
 	"github.com/mozilla-services/heka/pipeline"
 )
 
-type OpenTsdbToZabbixEncoder struct {
-	config *OpenTsdbToZabbixEncoderConfig
+type ZabbixEncoder struct {
+	config *ZabbixEncoderConfig
 }
 
-type OpenTsdbToZabbixEncoderConfig struct {
+type ZabbixEncoderConfig struct {
 }
 
 type zabbixMetricJson struct {
-	Host  string
-	Key   string
-	Value string
-	Clock string
+	Host  string `json:"host"`
+	Key   string `json:"key"`
+	Value string `json:"value"`
+	Clock string `json:"clock"`
 }
 
-func (oze *OpenTsdbToZabbixEncoder) ConfigStruct() interface{} {
-	return &OpenTsdbToZabbixEncoderConfig{}
+func (ze *ZabbixEncoder) ConfigStruct() interface{} {
+	return &ZabbixEncoderConfig{}
 }
 
-func (oze *OpenTsdbToZabbixEncoder) Init(config interface{}) (err error) {
-	oze.config = config.(*OpenTsdbToZabbixEncoderConfig)
+func (ze *ZabbixEncoder) Init(config interface{}) (err error) {
+	ze.config = config.(*ZabbixEncoderConfig)
 
 	return
 }
@@ -65,7 +65,7 @@ func fieldToString(fieldName string, pack *pipeline.PipelinePack) (val string, e
 	return
 }
 
-func (oe *OpenTsdbToZabbixEncoder) Encode(pack *pipeline.PipelinePack) (output []byte, err error) {
+func (ze *ZabbixEncoder) Encode(pack *pipeline.PipelinePack) (output []byte, err error) {
 	var zm zabbixMetricJson
 
 	zm.Clock = fmt.Sprintf("%d", time.Unix(0, pack.Message.GetTimestamp()).UTC().Unix())
@@ -86,7 +86,7 @@ func (oe *OpenTsdbToZabbixEncoder) Encode(pack *pipeline.PipelinePack) (output [
 }
 
 func init() {
-	pipeline.RegisterPlugin("OpenTsdbToZabbixEncoder", func() interface{} {
-		return new(OpenTsdbToZabbixEncoder)
+	pipeline.RegisterPlugin("ZabbixEncoder", func() interface{} {
+		return new(ZabbixEncoder)
 	})
 }

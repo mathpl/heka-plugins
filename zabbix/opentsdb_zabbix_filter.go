@@ -52,14 +52,16 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 	for pack = range fr.InChan() {
 		pack2 := h.PipelinePack(pack.MsgLoopCount)
 		if pack2 == nil {
-			fr.LogError(fmt.Errorf("exceeded MaxMsgLoops = %d",
-				h.PipelineConfig().Globals.MaxMsgLoops))
+			fr.LogError(fmt.Errorf("exceeded MaxMsgLoops = %d", h.PipelineConfig().Globals.MaxMsgLoops))
+			pack.Recycle()
 			break
 		}
 
 		opentsdb_key, ok := pack.Message.GetFieldValue("Metric")
 		if !ok {
 			err = fmt.Errorf("Unable to find Field[\"Metric\"] field in message, make sure it's been decoded by OpenstdbRawDecoder.")
+			pack.Recycle()
+			pack2.Recycle()
 			continue
 		}
 
@@ -104,6 +106,12 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 					break
 				}
 			}
+		}
+		pack.Recycle()
+
+		if err != nil {
+			pack2.Recycle()
+			continue
 		}
 
 		if ozf.conf.SortTags {
@@ -153,7 +161,6 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 		pack2.Message.AddField(field)
 
 		pack2.Message.SetType("zabbix")
-
 		fr.Inject(pack2)
 	}
 
