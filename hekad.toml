@@ -1,6 +1,12 @@
 [hekad]
 base_dir="base_heka"
-share_dir="share_heka"
+share_dir="/home/mpa/git/mozilla-services/heka/build/heka"
+
+[Dashboard]
+type = "DashboardOutput"
+address = ":4352"
+static_directory = "/home/mpa/git/mozilla-services/heka/build/heka/dasher"
+ticker_interval = 5
 
 [tcp:4242]
 type = "TcollectorInput"
@@ -36,15 +42,22 @@ message_matcher = "Type == 'opentsdb'"
 
 [zabbix]
 type = "ZabbixOutput"
+encoder = "zabbix_encoder"
+
 ticker_interval = 5
 send_key_count = 1000
 max_key_count = 2000
-receive_timeout = 1000
+
 #address = "zabbix.tm.tmcs:10051"
-#address = "192.168.56.101:10051"
-address = "localhost:10051"
-zabbix_active_check_filtering=false
+address = "192.168.56.101:10051"
+#address = "localhost:10051"
 zabbix_checks_poll_interval=300
-encoder = "zabbix_encoder"
-override_hostname= "testhost"
+
+key_seen_window = 5
+
+send_timeout = 1000
+receive_timeout = 1000
+
 message_matcher = "Type == 'zabbix'"
+
+override_hostname= "testhost"

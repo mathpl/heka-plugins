@@ -135,11 +135,11 @@ func (zc *ZabbixConn) ZabbixReceive() (result []byte, err error) {
 	return
 }
 
-func (zc *ZabbixConn) FetchActiveChecks(host string) (hac HostActiveChecks, err error) {
+func (zc *ZabbixConn) FetchActiveChecks(host string) (hc HostActiveKeys, err error) {
 	msg := fmt.Sprintf("{\"request\":\"active checks\",\"host\":\"%s\"}", host)
 	data := []byte(msg)
 
-	hac.Keys = make(map[string]int, 1)
+	hc = make(HostActiveKeys, 1)
 
 	if err = zc.ZabbixSend(data); err != nil {
 		return
@@ -159,13 +159,13 @@ func (zc *ZabbixConn) FetchActiveChecks(host string) (hac HostActiveChecks, err 
 			// Push key names for the current host
 			for _, activeCheckKey := range unmarshalledResult.Data {
 				if fDelay, ok := activeCheckKey.Delay.(float64); ok {
-					hac.Keys[activeCheckKey.Key] = int(fDelay)
+					hc[activeCheckKey.Key] = time.Duration(int(fDelay)) * time.Second
 				} else if sDelay, ok := activeCheckKey.Delay.(string); ok {
 					// Put 15 as delay if strconv doesn't work for now
 					if delay, conv_err := strconv.ParseInt(sDelay, 10, 32); conv_err != nil {
-						hac.Keys[activeCheckKey.Key] = 15
+						hc[activeCheckKey.Key] = time.Duration(15 * time.Second)
 					} else {
-						hac.Keys[activeCheckKey.Key] = int(delay)
+						hc[activeCheckKey.Key] = time.Duration(int(delay)) * time.Second
 					}
 				}
 			}

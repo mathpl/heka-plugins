@@ -4,21 +4,31 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 	"time"
 
+	"github.com/mozilla-services/heka/message"
 	. "github.com/mozilla-services/heka/pipeline"
 )
 
 // Output plugin that sends messages via TCP using the Heka protocol.
 type ZabbixOutput struct {
-	conf        *ZabbixOutputConfig
-	key_filter  map[string]*HostActiveChecks
-	zabbix_conn ZabbixConn
+	conf            *ZabbixOutputConfig
+	key_filter      map[string]HostActiveKeys
+	key_seen_window time.Duration
+	key_seen        map[string]HostSeenKeys
+	zabbix_conn     ZabbixConn
+	report_chan     chan chan reportMsg
 }
 
-type HostActiveChecks struct {
-	Keys map[string]int
+type reportMsg struct {
+	name   string
+	values []string
 }
+
+type HostActiveKeys map[string]time.Duration
+type HostSeenKeys map[string]time.Time
 
 // ConfigStruct for ZabbixOutputstruct plugin.
 type ZabbixOutputConfig struct {
@@ -26,8 +36,6 @@ type ZabbixOutputConfig struct {
 	Address string `toml:"address"`
 	// Maximum interval between each send
 	TickerInterval uint `toml:"ticker_interval"`
-	// Time between each update from the zabbix server for key filtering
-	ZabbixActiveCheckFiltering bool `toml:"zabbix_active_check_filtering"`
 	// Time between each update from the zabbix server for key filtering
 	ZabbixChecksPollInterval uint `toml:"zabbix_checks_poll_interval"`
 	// Maximum key count retained when zabbix doesn't respond
@@ -42,18 +50,20 @@ type ZabbixOutputConfig struct {
 	SendTimeout uint `toml:"send_timeout"`
 	// Override hostname
 	OverrideHostname string `toml:"override_hostname"`
+	// Clean up key seen beyond that time
+	KeySeenWindow uint `toml:"key_seen_window"`
 }
 
 func (zo *ZabbixOutput) ConfigStruct() interface{} {
 	return &ZabbixOutputConfig{
-		Encoder:                    "ZabbixEncoder",
-		TickerInterval:             uint(15),
-		ZabbixActiveCheckFiltering: true,
-		ZabbixChecksPollInterval:   uint(300),
-		ReceiveTimeout:             uint(3),
-		SendTimeout:                uint(1),
-		SendKeyCount:               uint(1000),
-		MaxKeyCount:                uint(2000),
+		Encoder:                  "ZabbixEncoder",
+		TickerInterval:           uint(15),
+		ZabbixChecksPollInterval: uint(300),
+		ReceiveTimeout:           uint(3),
+		SendTimeout:              uint(1),
+		SendKeyCount:             uint(1000),
+		MaxKeyCount:              uint(2000),
+		KeySeenWindow:            uint(0),
 	}
 }
 
@@ -61,7 +71,11 @@ func (zo *ZabbixOutput) Init(config interface{}) (err error) {
 	zo.conf = config.(*ZabbixOutputConfig)
 
 	zo.zabbix_conn, err = NewZabbixConn(zo.conf.Address, zo.conf.ReceiveTimeout, zo.conf.SendTimeout)
-	zo.key_filter = make(map[string]*HostActiveChecks)
+	zo.report_chan = make(chan chan reportMsg, 1)
+	zo.key_filter = make(map[string]HostActiveKeys)
+
+	zo.key_seen_window = time.Duration(zo.conf.KeySeenWindow) * time.Second
+	zo.key_seen = make(map[string]HostSeenKeys)
 	if zo.conf.OverrideHostname != "" {
 		zo.key_filter[zo.conf.OverrideHostname] = nil
 	} else {
@@ -157,9 +171,17 @@ func (zo *ZabbixOutput) Filter(pack *PipelinePack) (discard bool, err error) {
 		return
 	}
 
+	// Populate key seen if enabled
+	if zo.conf.KeySeenWindow != 0 {
+		if hs, found := zo.key_seen[host]; !found || hs == nil {
+			zo.key_seen[host] = make(HostSeenKeys, 1)
+		}
+		zo.key_seen[host][key] = time.Now()
+	}
+
 	// Check against active check filter
-	if hac, found_host := zo.key_filter[host]; found_host && hac != nil {
-		if _, found_key := hac.Keys[key]; found_key {
+	if hc, found_host := zo.key_filter[host]; found_host && hc != nil {
+		if _, found_key := hc[key]; found_key {
 			discard = false
 		}
 	} else {
@@ -197,9 +219,17 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 
 	updateFilter := make(chan bool, 1)
 	go func() {
-		for zo.conf.ZabbixActiveCheckFiltering {
+		for zo.conf.ZabbixChecksPollInterval != 0 {
 			updateFilter <- true
 			time.Sleep(time.Duration(zo.conf.ZabbixChecksPollInterval) * time.Second)
+		}
+	}()
+
+	keySeenCleanup := make(chan bool, 1)
+	go func() {
+		for zo.conf.KeySeenWindow != 0 {
+			keySeenCleanup <- true
+			time.Sleep(time.Duration(zo.conf.KeySeenWindow) * time.Second)
 		}
 	}()
 
@@ -214,12 +244,11 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 
 			// FIXME: Move to seperate goroutine so it's non-blocking
 			for host, _ := range zo.key_filter {
-				if hac, localErr := zo.zabbix_conn.FetchActiveChecks(host); localErr != nil {
+				if hc, localErr := zo.zabbix_conn.FetchActiveChecks(host); localErr != nil {
 					// Keep previous list if the server can't refresh the list of checks
 					or.LogError(fmt.Errorf("Zabbix server unable to provide active check list for host %s: %s", host, localErr))
 				} else {
-					zo.key_filter[host] = &hac
-					//fmt.Printf("%s\n%+V\n", host, hac.Keys)
+					zo.key_filter[host] = hc
 				}
 			}
 
@@ -229,7 +258,7 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 			}
 
 			// Skip discard check if disable
-			if zo.conf.ZabbixActiveCheckFiltering {
+			if zo.conf.ZabbixChecksPollInterval != 0 {
 				if discard, err := zo.Filter(pack); err != nil {
 					or.LogError(err)
 					pack.Recycle()
@@ -261,6 +290,44 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 					or.LogError(err)
 				}
 			}
+
+		case <-keySeenCleanup:
+			for host, hs := range zo.key_seen {
+				for key, t := range hs {
+					if time.Now().After(t.Add(zo.key_seen_window)) {
+						delete(hs, key)
+					}
+				}
+				if len(hs) == 0 {
+					delete(zo.key_seen, host)
+				}
+			}
+
+		case rchan := <-zo.report_chan:
+			for host, hc := range zo.key_filter {
+				rm := reportMsg{name: fmt.Sprintf("ActiveChecks-%s", host)}
+				if hc != nil {
+					rm.values = make([]string, len(hc))
+					vs := rm.values[0:0]
+					for key, _ := range hc {
+						vs = append(vs, key)
+					}
+					rchan <- rm
+				}
+			}
+			for host, hs := range zo.key_seen {
+				rm := reportMsg{name: fmt.Sprintf("KeySeen-%s", host)}
+				if hs != nil {
+					rm.values = make([]string, len(hs))
+					vs := rm.values[0:0]
+					for key, _ := range hs {
+						vs = append(vs, key)
+					}
+					rchan <- rm
+				}
+			}
+
+			close(rchan)
 		}
 	}
 
@@ -271,4 +338,18 @@ func init() {
 	RegisterPlugin("ZabbixOutput", func() interface{} {
 		return new(ZabbixOutput)
 	})
+}
+
+// ReportMsg provides plugin state to Heka report and dashboard.
+func (zo *ZabbixOutput) ReportMsg(msg *message.Message) error {
+	rchan := make(chan reportMsg, 1)
+	zo.report_chan <- rchan
+
+	for rm := range rchan {
+		sort.Strings(rm.values)
+		joined_values := strings.Join(rm.values, " ")
+		message.NewStringField(msg, rm.name, joined_values)
+	}
+
+	return nil
 }
