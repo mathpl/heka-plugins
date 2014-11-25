@@ -17,7 +17,16 @@ type = "OpenTsdbRawEncoder"
 type = "ZabbixEncoder"
 
 [OpentsdbZabbixFilter]
+strip_tags = [ "product", "cluster", "class" ]
 message_matcher = "Type == 'opentsdb'"
+
+  [OpentsdbZabbixFilter.replace]
+  / = "_"
+
+  [OpentsdbZabbixFilter.replace_tag_name]
+  class_name = "cn-"
+  exception_class = "ec-"
+  method_signature = "ms-"
 
 [opentsd]
 type = "TcpOutput"
@@ -28,13 +37,14 @@ message_matcher = "Type == 'opentsdb'"
 [zabbix]
 type = "ZabbixOutput"
 ticker_interval = 5
-send_key_count = 3
-max_key_count = 10
-receive_timeout = 500
+send_key_count = 1000
+max_key_count = 2000
+receive_timeout = 1000
 #address = "zabbix.tm.tmcs:10051"
-address = "192.168.56.101:10051"
-zabbix_checks_poll_interval=10
+#address = "192.168.56.101:10051"
+address = "localhost:10051"
+zabbix_active_check_filtering=false
+zabbix_checks_poll_interval=300
 encoder = "zabbix_encoder"
 override_hostname= "testhost"
-#override_hostname= "mgr1.mf.ams2.coresys.tmcs"
 message_matcher = "Type == 'zabbix'"

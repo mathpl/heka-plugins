@@ -32,10 +32,18 @@ type OpentsdbZabbixFilter struct {
 
 type OpentsdbZabbixFilterConfig struct {
 	// Sort tag by name before adding them at the end of the opentsdb key
-	// to create the Zabbix key
+	// to create the Zabbix key. Off will conserve tag order as received.
 	SortTags bool `toml:"sort_tags"`
-	// List of string to omit from Zabbix key creation
+
+	// List of tags to omit from Zabbix key creation
 	StripTags []string `toml:"strip_tags"`
+
+	// Various string.Replace maps applied on specific parts of the
+	// Opentsdb data.
+	Replace         map[string]string `toml:"replace"`
+	ReplaceKey      map[string]string `toml:"replace_key"`
+	ReplaceTagName  map[string]string `toml:"replace_tag_name"`
+	ReplaceTagValue map[string]string `toml:"replace_tag_value"`
 }
 
 func (ozf *OpentsdbZabbixFilter) ConfigStruct() interface{} {
@@ -47,6 +55,17 @@ func (ozf *OpentsdbZabbixFilter) Init(config interface{}) (err error) {
 	ozf.strip_tags = make(map[string]bool, len(ozf.conf.StripTags))
 	for _, tag := range ozf.conf.StripTags {
 		ozf.strip_tags[tag] = true
+	}
+	return
+}
+
+func applyReplaceMap(val string, m map[string]string) (s string) {
+	s = val
+	for src, to := range m {
+		s = strings.Replace(s, src, to, -1)
+		if s != val {
+			fmt.Printf("Replace %s by %s", src, to)
+		}
 	}
 	return
 }
@@ -83,6 +102,9 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 				continue
 			}
 
+			k = applyReplaceMap(k, ozf.conf.Replace)
+			k = applyReplaceMap(k, ozf.conf.ReplaceTagName)
+
 			v := field.GetValue()
 			switch k {
 			case "host":
@@ -103,6 +125,8 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 				}
 			case "Metric":
 				if vs, ok := v.(string); ok {
+					k = applyReplaceMap(k, ozf.conf.Replace)
+					k = applyReplaceMap(k, ozf.conf.ReplaceKey)
 					opentsdb_key = vs
 				} else {
 					err = fmt.Errorf("Unexpected Metric type %+V", v)
@@ -110,8 +134,12 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 				}
 			default:
 				if vs, ok := v.(string); ok {
-					//FIXME: Less append, more correct sizing from start
+					k = applyReplaceMap(k, ozf.conf.Replace)
+					k = applyReplaceMap(k, ozf.conf.ReplaceTagValue)
+
 					key_part := fmt.Sprintf("%s.%s", k, vs)
+
+					//FIXME: Less append, more correct sizing from start
 					key_extension = append(key_extension, key_part)
 				} else {
 					err = fmt.Errorf("Unexpected Tag type %+V", v)

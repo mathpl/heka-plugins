@@ -27,6 +27,8 @@ type ZabbixOutputConfig struct {
 	// Maximum interval between each send
 	TickerInterval uint `toml:"ticker_interval"`
 	// Time between each update from the zabbix server for key filtering
+	ZabbixActiveCheckFiltering bool `toml:"zabbix_active_check_filtering"`
+	// Time between each update from the zabbix server for key filtering
 	ZabbixChecksPollInterval uint `toml:"zabbix_checks_poll_interval"`
 	// Maximum key count retained when zabbix doesn't respond
 	MaxKeyCount uint `toml:"max_key_count"`
@@ -44,13 +46,14 @@ type ZabbixOutputConfig struct {
 
 func (zo *ZabbixOutput) ConfigStruct() interface{} {
 	return &ZabbixOutputConfig{
-		Encoder:                  "OpentsdbToZabbix",
-		TickerInterval:           uint(15),
-		ZabbixChecksPollInterval: uint(300),
-		ReceiveTimeout:           uint(3),
-		SendTimeout:              uint(1),
-		SendKeyCount:             uint(1000),
-		MaxKeyCount:              uint(2000),
+		Encoder:                    "ZabbixEncoder",
+		TickerInterval:             uint(15),
+		ZabbixActiveCheckFiltering: true,
+		ZabbixChecksPollInterval:   uint(300),
+		ReceiveTimeout:             uint(3),
+		SendTimeout:                uint(1),
+		SendKeyCount:               uint(1000),
+		MaxKeyCount:                uint(2000),
 	}
 }
 
@@ -194,10 +197,9 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 
 	updateFilter := make(chan bool, 1)
 	go func() {
-		updateFilter <- true
-		for {
-			time.Sleep(time.Duration(zo.conf.ZabbixChecksPollInterval) * time.Second)
+		for zo.conf.ZabbixActiveCheckFiltering {
 			updateFilter <- true
+			time.Sleep(time.Duration(zo.conf.ZabbixChecksPollInterval) * time.Second)
 		}
 	}()
 
@@ -226,13 +228,16 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 				break
 			}
 
-			if discard, err := zo.Filter(pack); err != nil {
-				or.LogError(err)
-				pack.Recycle()
-				continue
-			} else if discard {
-				pack.Recycle()
-				continue
+			// Skip discard check if disable
+			if zo.conf.ZabbixActiveCheckFiltering {
+				if discard, err := zo.Filter(pack); err != nil {
+					or.LogError(err)
+					pack.Recycle()
+					continue
+				} else if discard {
+					pack.Recycle()
+					continue
+				}
 			}
 
 			if msg, localErr := or.Encode(pack); localErr != nil {
