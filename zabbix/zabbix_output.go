@@ -89,7 +89,7 @@ func (zo *ZabbixOutput) Init(config interface{}) (err error) {
 		err = fmt.Errorf("Invalid combinason of send_key_count and max_key_count: %d must be <= %d", zo.conf.SendKeyCount, zo.conf.MaxKeyCount)
 	}
 
-	if zo.conf.ZabbixChecksPollInterval <= zo.conf.ReceiveTimeout/1000 {
+	if zo.conf.ZabbixChecksPollInterval != 0 && zo.conf.ZabbixChecksPollInterval <= zo.conf.ReceiveTimeout/1000 {
 		err = fmt.Errorf("Invalid combinason of zabbix_checks_poll_interval and receive_timeout: %d must > %d", zo.conf.SendKeyCount, zo.conf.MaxKeyCount)
 	}
 
@@ -285,6 +285,10 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 			}
 
 		case <-ticker:
+			if !ok {
+				break
+			}
+
 			if len(dataSlice) > 0 {
 				if dataSlice, err = zo.SendMetrics(or, dataSlice); err != nil {
 					or.LogError(err)
@@ -292,6 +296,10 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 			}
 
 		case <-keySeenCleanup:
+			if !ok {
+				break
+			}
+
 			for host, hs := range zo.key_seen {
 				for key, t := range hs {
 					if time.Now().After(t.Add(zo.key_seen_window)) {
@@ -304,6 +312,10 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 			}
 
 		case rchan := <-zo.report_chan:
+			if !ok {
+				break
+			}
+
 			for host, hc := range zo.key_filter {
 				rm := reportMsg{name: fmt.Sprintf("ActiveChecks-%s", host)}
 				if hc != nil {
