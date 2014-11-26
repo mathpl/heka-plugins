@@ -60,4 +60,4 @@ receive_timeout = 1000
 
 message_matcher = "Type == 'zabbix'"
 
-override_hostname= "testhost"
+override_hostname= "jim1.mf.dev43.coresys.tmcs"

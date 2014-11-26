@@ -10,6 +10,7 @@
 # Contributor(s):
 #   Rob Miller (rmiller@mozilla.com)
 #   Carlos Diaz-Padron (cpadron@mozilla.com,carlos@carlosdp.io)
+#   Mathieu Payeur Levallois (math.pay@gmail.com)
 #
 # ***** END LICENSE BLOCK *****/
 
@@ -28,6 +29,8 @@ import (
 	. "github.com/mozilla-services/heka/message"
 	. "github.com/mozilla-services/heka/pipeline"
 )
+
+// TcollectorInput _heavily_ based on TcpInput code.
 
 // Input plugin implementation that listens for Heka protocol messages on a
 // specified TCP socket. Creates a separate goroutine for each TCP connection.
