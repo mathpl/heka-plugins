@@ -317,6 +317,8 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 			}
 
 			for host, hc := range zo.key_filter {
+				// Fix for js cutting at dot in the field name
+				host = strings.Replace(host, ".", "_", -1)
 				rm := reportMsg{name: fmt.Sprintf("ActiveChecks-%s", host)}
 				if hc != nil {
 					rm.values = make([]string, len(hc))
