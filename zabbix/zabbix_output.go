@@ -330,6 +330,7 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 				}
 			}
 			for host, hs := range zo.key_seen {
+				host = strings.Replace(host, ".", "_", -1)
 				rm := reportMsg{name: fmt.Sprintf("KeySeen-%s", host)}
 				if hs != nil {
 					rm.values = make([]string, len(hs))
