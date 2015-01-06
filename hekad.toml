@@ -25,15 +25,20 @@ type = "ZabbixEncoder"
 [OpentsdbZabbixFilter]
 strip_tags = [ "product", "cluster", "class" ]
 message_matcher = "Type == 'opentsdb'"
+
+# ["match","replace"], ...
 replace_tag_name = [ ["/","_"], ["=","-"], ["class_name","cn"], ["exception_class","ec"],
                      ["method_signature","ms"] ]
 replace_tag_value = [ ["com.ticketmaster.",""] ]
+
 adaptative_key_shortening = true
 adaptative_key_shortening_strategy = "split_value"
 
+  # Increment the ending number to add another rule
+  # All replace have been applied by this point
   [OpentsdbZabbixFilter.adaptative_key_shortening_strategy_split_value.1]
   must_match_key = "ms"
-  delimiter = "."
+  delimiter = "_"
   keep_fields = [ 0 ]
   
 [opentsd]
@@ -53,7 +58,9 @@ max_key_count = 2000
 #address = "zabbix.tm.tmcs:10051"
 #address = "192.168.56.101:10051"
 address = "localhost:10051"
-zabbix_checks_poll_interval=0
+
+# Set to 0 to disable active agent filtering
+zabbix_checks_poll_interval=300
 
 key_seen_window = 5
 

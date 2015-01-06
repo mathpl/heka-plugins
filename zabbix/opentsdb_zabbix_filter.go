@@ -151,7 +151,6 @@ func applyShorteningSplit(svs map[string]SplitValueStrategy, key_extension Tags)
 			// We have a match or we don't need one
 			if (ss.MustMatchKey != "" && strings.Contains(ss.MustMatchKey, tag.Key)) || ss.MustMatchKey == "" {
 				split_val := strings.Split(tag.Value, ss.Delimiter)
-				fmt.Printf("%+V\n", split_val)
 				var v []string
 				for _, i := range ss.KeepFields {
 					v = append(v, split_val[i])
