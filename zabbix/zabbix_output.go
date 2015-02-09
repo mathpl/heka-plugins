@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mathpl/active_zabbix"
+
 	"github.com/mozilla-services/heka/message"
 	. "github.com/mozilla-services/heka/pipeline"
 )
@@ -15,10 +17,10 @@ import (
 // Output plugin that sends messages via TCP using the Heka protocol.
 type ZabbixOutput struct {
 	conf            *ZabbixOutputConfig
-	key_filter      map[string]HostActiveKeys
+	key_filter      map[string]active_zabbix.HostActiveKeys
 	key_seen_window time.Duration
 	key_seen        map[string]HostSeenKeys
-	zabbix_conn     ZabbixConn
+	zabbix_client   active_zabbix.ZabbixActiveClient
 	report_chan     chan chan reportMsg
 }
 
@@ -70,9 +72,9 @@ func (zo *ZabbixOutput) ConfigStruct() interface{} {
 func (zo *ZabbixOutput) Init(config interface{}) (err error) {
 	zo.conf = config.(*ZabbixOutputConfig)
 
-	zo.zabbix_conn, err = NewZabbixConn(zo.conf.Address, zo.conf.ReceiveTimeout, zo.conf.SendTimeout)
+	zo.zabbix_client, err = active_zabbix.NewZabbixActiveClient(zo.conf.Address, zo.conf.ReceiveTimeout, zo.conf.SendTimeout)
 	zo.report_chan = make(chan chan reportMsg, 1)
-	zo.key_filter = make(map[string]HostActiveKeys)
+	zo.key_filter = make(map[string]active_zabbix.HostActiveKeys)
 
 	zo.key_seen_window = time.Duration(zo.conf.KeySeenWindow) * time.Second
 	zo.key_seen = make(map[string]HostSeenKeys)
@@ -97,8 +99,6 @@ func (zo *ZabbixOutput) Init(config interface{}) (err error) {
 }
 
 func (zo *ZabbixOutput) SendRecords(records [][]byte) (data_left [][]byte, err error) {
-	defer zo.zabbix_conn.cleanupConn()
-
 	//FIXME: Proper json encoding
 	msgHeader := []byte("{\"request\":\"agent data\",\"data\":[")
 	msgHeaderLength := len(msgHeader)
@@ -124,12 +124,9 @@ func (zo *ZabbixOutput) SendRecords(records [][]byte) (data_left [][]byte, err e
 		msgSlice = append(msgSlice, joinedRecords...)
 		msgSlice = append(msgSlice, msgClose...)
 
-		if err = zo.zabbix_conn.ZabbixSend(msgSlice); err != nil {
+		if err = zo.zabbix_client.ZabbixSendAndForget(msgSlice); err != nil {
 			return data_left, err
 		}
-
-		// Disconnect between batches
-		zo.zabbix_conn.cleanupConn()
 
 		// Move down the slice
 		data_left = data_left[length:]
@@ -244,7 +241,7 @@ func (zo *ZabbixOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 
 			// FIXME: Move to seperate goroutine so it's non-blocking
 			for host, _ := range zo.key_filter {
-				if hc, localErr := zo.zabbix_conn.FetchActiveChecks(host); localErr != nil {
+				if hc, localErr := zo.zabbix_client.FetchActiveChecks(host); localErr != nil {
 					// Keep previous list if the server can't refresh the list of checks
 					or.LogError(fmt.Errorf("Zabbix server unable to provide active check list for host %s: %s", host, localErr))
 				} else {

@@ -72,9 +72,15 @@ func (t *TcollectorInput) ConfigStruct() interface{} {
 	return config
 }
 
-func (t *TcollectorInput) Init(config interface{}) error {
-	var err error
+func (t *TcollectorInput) Init(config interface{}) (err error) {
 	t.config = config.(*TcollectorInputConfig)
+	if len(t.config.Delimiter) > 1 {
+		return fmt.Errorf("invalid delimiter: %s", t.config.Delimiter)
+	}
+	if t.config.KeepAlivePeriod != 0 {
+		t.keepAliveDuration = time.Duration(t.config.KeepAlivePeriod) * time.Second
+	}
+
 	address, err := net.ResolveTCPAddr(t.config.Net, t.config.Address)
 	if err != nil {
 		return fmt.Errorf("ListenTCP failed: %s\n", err.Error())
@@ -83,21 +89,8 @@ func (t *TcollectorInput) Init(config interface{}) error {
 	if err != nil {
 		return fmt.Errorf("ListenTCP failed: %s\n", err.Error())
 	}
-	// We're already listening, make sure we clean up if init fails later on.
-	closeIt := true
-	defer func() {
-		if closeIt {
-			t.listener.Close()
-		}
-	}()
-	if len(t.config.Delimiter) > 1 {
-		return fmt.Errorf("invalid delimiter: %s", t.config.Delimiter)
-	}
-	if t.config.KeepAlivePeriod != 0 {
-		t.keepAliveDuration = time.Duration(t.config.KeepAlivePeriod) * time.Second
-	}
-	closeIt = false
-	return nil
+
+	return
 }
 
 func NetworkPayloadParserAndAnswer(conn net.Conn,

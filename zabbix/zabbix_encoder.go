@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/mathpl/active_zabbix"
+
 	"github.com/mozilla-services/heka/pipeline"
 )
 
@@ -27,13 +29,6 @@ type ZabbixEncoder struct {
 }
 
 type ZabbixEncoderConfig struct {
-}
-
-type zabbixMetricJson struct {
-	Host  string `json:"host"`
-	Key   string `json:"key"`
-	Value string `json:"value"`
-	Clock string `json:"clock"`
 }
 
 func (ze *ZabbixEncoder) ConfigStruct() interface{} {
@@ -66,7 +61,7 @@ func fieldToString(fieldName string, pack *pipeline.PipelinePack) (val string, e
 }
 
 func (ze *ZabbixEncoder) Encode(pack *pipeline.PipelinePack) (output []byte, err error) {
-	var zm zabbixMetricJson
+	var zm active_zabbix.ZabbixMetricKeyJson
 
 	zm.Clock = fmt.Sprintf("%d", time.Unix(0, pack.Message.GetTimestamp()).UTC().Unix())
 

@@ -279,7 +279,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 			continue
 		}
 
-		zabbix_key := fmt.Sprintf("%s.%s", opentsdb_key.(string), key_extension.MakeKey())
+		zabbix_key := fmt.Sprintf(strings.Join([]string{opentsdb_key.(string), key_extension.MakeKey()}, "."))
 		if len(zabbix_key) > ZABBIX_KEY_LENGTH_LIMIT {
 			if ozf.conf.AdaptativeKeyShortening {
 				if key_extension, err = ozf.applyShortening(key_extension); err != nil {
