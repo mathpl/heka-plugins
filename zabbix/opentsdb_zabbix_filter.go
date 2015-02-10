@@ -279,7 +279,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 			continue
 		}
 
-		zabbix_key := []string{opentsdb_key.(string)}
+		zabbix_key := opentsdb_key.(string)
 		suffix := key_extension.MakeKey()
 		if suffix != "" {
 			zabbix_key = fmt.Sprintf("%s.%s", zabbix_key, suffix)
