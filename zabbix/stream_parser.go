@@ -79,17 +79,18 @@ func (s *streamParserBuffer) SetMinimumBufferSize(size int) {
 }
 
 func (s *streamParserBuffer) read(reader io.Reader) (n int, err error) {
-	if cap(s.buf)-s.readPos <= 1024*4 {
-		if s.scanPos == 0 { // line will not fit in the current buffer
-			newSize := cap(s.buf) * 2
+	bufCap := cap(s.buf)
+	if bufCap-s.readPos <= bufCap/2 {
+		if s.scanPos == 0 { // Line won't fit in the current buffer.
+			newSize := bufCap * 2
 			if newSize > int(message.MAX_RECORD_SIZE) {
-				if cap(s.buf) == int(message.MAX_RECORD_SIZE) {
-					if s.readPos == cap(s.buf) {
+				if bufCap == int(message.MAX_RECORD_SIZE) {
+					if s.readPos == bufCap {
 						s.scanPos = 0
 						s.readPos = 0
-						return cap(s.buf), io.ErrShortBuffer
+						return bufCap, io.ErrShortBuffer
 					} else {
-						newSize = 0 // don't allocate any more memory, just read into what is left
+						newSize = 0 // Don't allocate more, just read into what's left.
 					}
 				} else {
 					newSize = int(message.MAX_RECORD_SIZE)
@@ -98,7 +99,8 @@ func (s *streamParserBuffer) read(reader io.Reader) (n int, err error) {
 			if newSize > 0 {
 				s.SetMinimumBufferSize(newSize)
 			}
-		} else { // reclaim the space at the beginning of the buffer
+		} else {
+			// Reclaim the space at the beginning of the buffer.
 			copy(s.buf, s.buf[s.scanPos:s.readPos])
 			s.readPos, s.scanPos = s.readPos-s.scanPos, 0
 		}
