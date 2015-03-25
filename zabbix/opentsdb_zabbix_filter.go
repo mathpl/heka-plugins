@@ -62,6 +62,11 @@ type OpentsdbZabbixFilter struct {
 	conf      *OpentsdbZabbixFilterConfig
 	stripTags map[string]bool
 
+	metricName string
+	valueName  string
+	tagPrefix  string
+	msgType    string
+
 	replace         map[string]string
 	replaceKey      map[string]string
 	replaceTagName  map[string]string
@@ -72,6 +77,18 @@ type OpentsdbZabbixFilterConfig struct {
 	// Sort tag by name before adding them at the end of the opentsdb key
 	// to create the Zabbix key. Off will conserve tag order as received.
 	SortTags bool `toml:"sort_tags"`
+
+	// Field in message used for the metric name
+	MetricField string `toml:"metric_field"`
+
+	// Field in message used for the value name
+	ValueField string `toml:"value_field"`
+
+	// Prefix used in field for tags
+	TagPrefix string `toml:"tag_prefix"`
+
+	// Message type for outbound messages
+	MessageType string `toml:"msg_type"`
 
 	// Max key length we'll accept to generate
 	MaxKeyLength int `toml:"max_key_length"`
@@ -127,6 +144,22 @@ func (ozf *OpentsdbZabbixFilter) Init(config interface{}) (err error) {
 	if ozf.conf.AdaptativeKeyShortening && ozf.conf.AdaptativeKeyShorteningStrategy == "" {
 		err = fmt.Errorf("AdaptativeKeyShortening enabled but no strategy is defined.")
 	}
+	ozf.msgType = ozf.conf.MessageType
+	if ozf.msgType == "" {
+		ozf.msgType = "zabbix"
+	}
+	ozf.metricName = ozf.conf.MetricField
+	if ozf.metricName == "" {
+		ozf.metricName = "data.name"
+	}
+	ozf.valueName = ozf.conf.ValueField
+	if ozf.valueName == "" {
+		ozf.valueName = "data.value"
+	}
+	ozf.tagPrefix = ozf.conf.TagPrefix
+	if ozf.tagPrefix == "" {
+		ozf.tagPrefix = "data.tags."
+	}
 
 	// Assemble the Replace maps
 	ozf.replace = mergeReplaceMaps(ozf.conf.Replace)
@@ -145,9 +178,9 @@ func applyReplaceMap(val string, m map[string]string) (s string) {
 	return
 }
 
-func applyShorteningSplit(svs map[string]SplitValueStrategy, key_extension Tags) Tags {
+func applyShorteningSplit(svs map[string]SplitValueStrategy, keyExtension Tags) Tags {
 	for _, ss := range svs {
-		for _, tag := range key_extension {
+		for _, tag := range keyExtension {
 			// We have a match or we don't need one
 			if (ss.MustMatchKey != "" && strings.Contains(ss.MustMatchKey, tag.Key)) || ss.MustMatchKey == "" {
 				split_val := strings.Split(tag.Value, ss.Delimiter)
@@ -160,13 +193,13 @@ func applyShorteningSplit(svs map[string]SplitValueStrategy, key_extension Tags)
 		}
 	}
 
-	return key_extension
+	return keyExtension
 }
 
-func (ozf *OpentsdbZabbixFilter) applyShortening(key_extension Tags) (shorter_key_extension Tags, err error) {
+func (ozf *OpentsdbZabbixFilter) applyShortening(keyExtension Tags) (shorter_keyExtension Tags, err error) {
 	switch ozf.conf.AdaptativeKeyShorteningStrategy {
 	case "split_value":
-		shorter_key_extension = applyShorteningSplit(ozf.conf.AdaptativeKeyShorteningStrategySplitValue, key_extension)
+		shorter_keyExtension = applyShorteningSplit(ozf.conf.AdaptativeKeyShorteningStrategySplitValue, keyExtension)
 	default:
 		err = fmt.Errorf("No AdaptativeKeyShorteningStrategy matched.")
 	}
@@ -199,7 +232,9 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 		fields := pack.Message.GetFields()
 		var host string
 		var value string
-		var key_extension Tags
+		var keyExtension Tags
+		tagPrefixLen := len(ozf.conf.TagPrefix)
+		//FIXME: Configurable field names. (data. prefix )
 		for _, field := range fields {
 			k := field.GetName()
 			if _, found := ozf.stripTags[k]; found {
@@ -214,7 +249,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 			switch k {
 			case "host":
 				host = v.(string)
-			case "Value":
+			case ozf.conf.ValueField:
 				switch vt := v.(type) {
 				case string:
 					value = vt
@@ -228,7 +263,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 					err = fmt.Errorf("Unexpected Value type %+V", v)
 					break
 				}
-			case "Metric":
+			case ozf.conf.MetricField:
 				if vs, ok := v.(string); ok {
 					k = applyReplaceMap(k, ozf.replace)
 					k = applyReplaceMap(k, ozf.replaceKey)
@@ -239,15 +274,18 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 				}
 			default:
 				if vs, ok := v.(string); ok {
-					vs = applyReplaceMap(vs, ozf.replace)
-					vs = applyReplaceMap(vs, ozf.replaceTagValue)
+					if strings.HasPrefix(vs, ozf.conf.TagPrefix) {
+						vs_tag := vs[tagPrefixLen:]
+						vs_tag = applyReplaceMap(vs_tag, ozf.replace)
+						vs_tag = applyReplaceMap(vs_tag, ozf.replaceTagValue)
 
-					t := &Tag{k, vs}
+						t := &Tag{k, vs_tag}
 
-					//FIXME: Less append, more correct sizing from start
-					key_extension = append(key_extension, t)
+						//FIXME: Less append, more correct sizing from start
+						keyExtension = append(keyExtension, t)
+					}
 				} else {
-					err = fmt.Errorf("Unexpected Tag type %+V", v)
+					err = fmt.Errorf("Unexpected type %+V", v)
 					break
 				}
 			}
@@ -261,7 +299,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 		}
 
 		if ozf.conf.SortTags {
-			sort.Sort(ByKey{key_extension})
+			sort.Sort(ByKey{keyExtension})
 		}
 
 		if host == "" {
@@ -280,20 +318,20 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 		}
 
 		zabbix_key := opentsdb_key.(string)
-		suffix := key_extension.MakeKey()
+		suffix := keyExtension.MakeKey()
 		if suffix != "" {
 			zabbix_key = fmt.Sprintf("%s.%s", zabbix_key, suffix)
 		}
 
 		if len(zabbix_key) > ZABBIX_KEY_LENGTH_LIMIT {
 			if ozf.conf.AdaptativeKeyShortening {
-				if key_extension, err = ozf.applyShortening(key_extension); err != nil {
+				if keyExtension, err = ozf.applyShortening(keyExtension); err != nil {
 					err = fmt.Errorf("Unable to apply AdaptativeKeyShorteningStrategy: %s", err)
 					fr.LogError(err)
 					pack2.Recycle()
 					continue
 				} else {
-					zabbix_key = fmt.Sprintf("%s.%s", opentsdb_key.(string), key_extension.MakeKey())
+					zabbix_key = fmt.Sprintf("%s.%s", opentsdb_key.(string), keyExtension.MakeKey())
 				}
 			}
 
@@ -330,7 +368,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 		}
 		pack2.Message.AddField(field)
 
-		pack2.Message.SetType("zabbix")
+		pack2.Message.SetType(ozf.conf.MessageType)
 		fr.Inject(pack2)
 	}
 
