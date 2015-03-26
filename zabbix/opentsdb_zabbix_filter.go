@@ -285,7 +285,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 						keyExtension = append(keyExtension, t)
 					}
 				} else {
-					err = fmt.Errorf("Unexpected type %+V", v)
+					err = fmt.Errorf("Unexpected type %s %+V", k, v)
 					break
 				}
 			}

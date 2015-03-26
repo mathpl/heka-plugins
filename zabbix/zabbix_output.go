@@ -22,6 +22,8 @@ type ZabbixOutput struct {
 	key_seen        map[string]HostSeenKeys
 	zabbix_client   active_zabbix.ZabbixActiveClient
 	report_chan     chan chan reportMsg
+
+	metricName string
 }
 
 type reportMsg struct {
@@ -54,6 +56,8 @@ type ZabbixOutputConfig struct {
 	OverrideHostname string `toml:"override_hostname"`
 	// Clean up key seen beyond that time
 	KeySeenWindow uint `toml:"key_seen_window"`
+	// Field in message used for the metric name
+	MetricField string `toml:"metric_field"`
 }
 
 func (zo *ZabbixOutput) ConfigStruct() interface{} {
@@ -93,6 +97,15 @@ func (zo *ZabbixOutput) Init(config interface{}) (err error) {
 
 	if zo.conf.ZabbixChecksPollInterval != 0 && zo.conf.ZabbixChecksPollInterval <= zo.conf.ReceiveTimeout/1000 {
 		err = fmt.Errorf("Invalid combinason of zabbix_checks_poll_interval and receive_timeout: %d must > %d", zo.conf.SendKeyCount, zo.conf.MaxKeyCount)
+	}
+
+	zo.metricName = zo.conf.MetricField
+	if zo.metricName == "" {
+		zo.metricName = "data.name"
+	}
+	zo.valueName = zo.conf.ValueField
+	if zo.valueName == "" {
+		zo.valueName = "data.value"
 	}
 
 	return
@@ -146,7 +159,7 @@ func (zo *ZabbixOutput) Filter(pack *PipelinePack) (discard bool, err error) {
 
 	discard = true
 
-	if val, found = pack.Message.GetFieldValue("Key"); !found {
+	if val, found = pack.Message.GetFieldValue(zo.metricName); !found {
 		err = fmt.Errorf("No Key in message")
 		pack.Recycle()
 		return
@@ -157,7 +170,7 @@ func (zo *ZabbixOutput) Filter(pack *PipelinePack) (discard bool, err error) {
 		return
 	}
 
-	if val, found = pack.Message.GetFieldValue("Host"); !found {
+	if val, found = pack.Message.GetFieldValue("host"); !found {
 		err = fmt.Errorf("No Host in message")
 		pack.Recycle()
 		return
