@@ -344,7 +344,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 		}
 
 		var field *message.Field
-		if field, err = message.NewField("Key", zabbix_key, ""); err != nil {
+		if field, err = message.NewField("key", zabbix_key, ""); err != nil {
 			err = fmt.Errorf("Unable to add Zabbix Key: %s", err)
 			fr.LogError(err)
 			pack2.Recycle()
@@ -352,7 +352,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 		}
 		pack2.Message.AddField(field)
 
-		if field, err = message.NewField("Host", host, ""); err != nil {
+		if field, err = message.NewField("host", host, ""); err != nil {
 			err = fmt.Errorf("Unable to add host: %s", err)
 			fr.LogError(err)
 			pack2.Recycle()
@@ -360,7 +360,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 		}
 		pack2.Message.AddField(field)
 
-		if field, err = message.NewField("Value", value, ""); err != nil {
+		if field, err = message.NewField("value", value, ""); err != nil {
 			err = fmt.Errorf("Unable to add value: %s", err)
 			fr.LogError(err)
 			pack2.Recycle()
