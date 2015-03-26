@@ -220,7 +220,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 			break
 		}
 
-		opentsdb_key, ok := pack.Message.GetFieldValue("Metric")
+		opentsdb_key, ok := pack.Message.GetFieldValue(ozf.metricName)
 		if !ok {
 			err = fmt.Errorf("Unable to find Field[\"Metric\"] field in message, make sure it's been decoded by OpenstdbRawDecoder.")
 			fr.LogError(err)
