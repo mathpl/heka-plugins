@@ -17,18 +17,10 @@ type ZabbixActiveDecoder struct {
 	helper PluginHelper
 	conf   *ZabbixActiveDecoderConfig
 
-	metricName string
-	valueName  string
-	msgType    string
+	msgType string
 }
 
 type ZabbixActiveDecoderConfig struct {
-	// Field in message used for the metric name
-	MetricField string `toml:"metric_field"`
-
-	// Field in message used for the value name
-	ValueField string `toml:"value_field"`
-
 	// Message type for outbound messages
 	MessageType string `toml:"msg_type"`
 }
@@ -42,14 +34,6 @@ func (d *ZabbixActiveDecoder) Init(config interface{}) error {
 	d.msgType = d.conf.MessageType
 	if d.msgType == "" {
 		d.msgType = "zabbix"
-	}
-	d.metricName = d.conf.MetricField
-	if d.metricName == "" {
-		d.metricName = "data.name"
-	}
-	d.valueName = d.conf.ValueField
-	if d.valueName == "" {
-		d.valueName = "data.value"
 	}
 
 	return nil
@@ -80,13 +64,13 @@ func (d *ZabbixActiveDecoder) Decode(pack *PipelinePack) (packs []*PipelinePack,
 		}
 		pack.Message.SetTimestamp(time.Unix(int64(unixTime), 0).UnixNano())
 
-		if err = d.addStatField(pack, d.metricName, metric.Key); err != nil {
+		if err = d.addStatField(pack, "key", metric.Key); err != nil {
 			continue
 		}
 		if err = d.addStatField(pack, "host", metric.Host); err != nil {
 			continue
 		}
-		if err = d.addStatField(pack, d.valueName, metric.Value); err != nil {
+		if err = d.addStatField(pack, "value", metric.Value); err != nil {
 			continue
 		}
 
