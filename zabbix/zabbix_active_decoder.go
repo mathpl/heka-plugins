@@ -83,7 +83,7 @@ func (d *ZabbixActiveDecoder) Decode(pack *PipelinePack) (packs []*PipelinePack,
 		if err = d.addStatField(pack, d.metricName, metric.Key); err != nil {
 			continue
 		}
-		if err = d.addStatField(pack, "Host", metric.Host); err != nil {
+		if err = d.addStatField(pack, "host", metric.Host); err != nil {
 			continue
 		}
 		if err = d.addStatField(pack, d.valueName, metric.Value); err != nil {
