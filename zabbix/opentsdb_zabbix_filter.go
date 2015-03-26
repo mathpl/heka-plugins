@@ -220,7 +220,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 			break
 		}
 
-		opentsdb_key, ok := pack.Message.GetFieldValue("Metric")
+		opentsdb_key, ok := pack.Message.GetFieldValue(ozf.metricName)
 		if !ok {
 			err = fmt.Errorf("Unable to find Field[\"Metric\"] field in message, make sure it's been decoded by OpenstdbRawDecoder.")
 			fr.LogError(err)
@@ -249,7 +249,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 			switch k {
 			case "host":
 				host = v.(string)
-			case ozf.conf.ValueField:
+			case ozf.valueName:
 				switch vt := v.(type) {
 				case string:
 					value = vt
@@ -263,7 +263,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 					err = fmt.Errorf("Unexpected Value type %+V", v)
 					break
 				}
-			case ozf.conf.MetricField:
+			case ozf.metricName:
 				if vs, ok := v.(string); ok {
 					k = applyReplaceMap(k, ozf.replace)
 					k = applyReplaceMap(k, ozf.replaceKey)
