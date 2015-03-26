@@ -368,7 +368,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 		}
 		pack2.Message.AddField(field)
 
-		pack2.Message.SetType(ozf.conf.MessageType)
+		pack2.Message.SetType(ozf.msgType)
 		fr.Inject(pack2)
 	}
 
