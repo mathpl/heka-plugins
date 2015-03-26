@@ -103,10 +103,6 @@ func (zo *ZabbixOutput) Init(config interface{}) (err error) {
 	if zo.metricName == "" {
 		zo.metricName = "data.name"
 	}
-	zo.valueName = zo.conf.ValueField
-	if zo.valueName == "" {
-		zo.valueName = "data.value"
-	}
 
 	return
 }
