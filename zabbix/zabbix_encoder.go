@@ -65,13 +65,13 @@ func (ze *ZabbixEncoder) Encode(pack *pipeline.PipelinePack) (output []byte, err
 
 	zm.Clock = fmt.Sprintf("%d", time.Unix(0, pack.Message.GetTimestamp()).UTC().Unix())
 
-	if zm.Key, err = fieldToString("Key", pack); err != nil {
+	if zm.Key, err = fieldToString("key", pack); err != nil {
 		return nil, err
 	}
-	if zm.Host, err = fieldToString("Host", pack); err != nil {
+	if zm.Host, err = fieldToString("host", pack); err != nil {
 		return nil, err
 	}
-	if zm.Value, err = fieldToString("Value", pack); err != nil {
+	if zm.Value, err = fieldToString("value", pack); err != nil {
 		return nil, err
 	}
 
