@@ -36,22 +36,42 @@ type Tags []*Tag
 
 func (ts Tags) Len() int      { return len(ts) }
 func (ts Tags) Swap(i, j int) { ts[i], ts[j] = ts[j], ts[i] }
-func (ts Tags) MakeKey() string {
-	var b bytes.Buffer
-	l := len(ts)
-	for i, t := range ts {
-		if t.Key != "" {
-			b.WriteString(t.Key)
-			b.WriteString(".")
-		}
-		b.WriteString(t.Value)
+func (ts Tags) MakeKey(mode string) string {
+	if mode == "append" {
+		var b bytes.Buffer
+		l := len(ts)
+		for i, t := range ts {
+			if t.Key != "" {
+				b.WriteString(t.Key)
+				b.WriteString(".")
+			}
+			b.WriteString(t.Value)
 
-		if i < l-1 {
-			b.WriteString(".")
+			if i < l-1 {
+				b.WriteString(".")
+			}
 		}
+		key := b.String()
+		if len(key) > 0 {
+			key = "." + key
+		}
+		return key
+	} else if mode == "parameter" {
+		var b bytes.Buffer
+		for _, t := range ts {
+			if t.Key != "" {
+				b.WriteString("[")
+				b.WriteString(t.Key)
+				b.WriteString("=")
+				b.WriteString(t.Value)
+				b.WriteString("]")
+			}
+		}
+
+		return b.String()
+	} else {
+		return ""
 	}
-
-	return b.String()
 }
 
 type ByKey struct{ Tags }
@@ -62,10 +82,11 @@ type OpentsdbZabbixFilter struct {
 	conf      *OpentsdbZabbixFilterConfig
 	stripTags map[string]bool
 
-	metricName string
-	valueName  string
-	tagPrefix  string
-	msgType    string
+	metricName       string
+	valueName        string
+	tagPrefix        string
+	msgType          string
+	tagDelimiterMode string
 
 	replace         map[string]string
 	replaceKey      map[string]string
@@ -86,6 +107,11 @@ type OpentsdbZabbixFilterConfig struct {
 
 	// Prefix used in field for tags
 	TagPrefix string `toml:"tag_prefix"`
+
+	// Method to append tags on the key name: append or parameter
+	// append: key.tag.tagv.tag.tav
+	// parameters: key[tag=tagv][tag=tagv]
+	TagDelimiterMode string `toml:"tag_delimiter_mode"`
 
 	// Message type for outbound messages
 	MessageType string `toml:"msg_type"`
@@ -160,6 +186,14 @@ func (ozf *OpentsdbZabbixFilter) Init(config interface{}) (err error) {
 	if ozf.tagPrefix == "" {
 		ozf.tagPrefix = "data.tags."
 	}
+	ozf.tagDelimiterMode = ozf.conf.TagDelimiterMode
+	if ozf.tagDelimiterMode == "" {
+		ozf.tagDelimiterMode = "parameter"
+	}
+	if ozf.tagDelimiterMode != "append" && ozf.tagDelimiterMode != "parameter" {
+		err = fmt.Errorf("Invalid tag delimiter mode, only 'append' or 'parameter' allowed.")
+		return
+	}
 
 	// Assemble the Replace maps
 	ozf.replace = mergeReplaceMaps(ozf.conf.Replace)
@@ -233,7 +267,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 		var host string
 		var value string
 		var keyExtension Tags
-		tagPrefixLen := len(ozf.conf.TagPrefix)
+		tagPrefixLen := len(ozf.tagPrefix)
 		//FIXME: Configurable field names. (data. prefix )
 		for _, field := range fields {
 			k := field.GetName()
@@ -274,19 +308,16 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 				}
 			default:
 				if vs, ok := v.(string); ok {
-					if strings.HasPrefix(vs, ozf.conf.TagPrefix) {
-						vs_tag := vs[tagPrefixLen:]
-						vs_tag = applyReplaceMap(vs_tag, ozf.replace)
-						vs_tag = applyReplaceMap(vs_tag, ozf.replaceTagValue)
+					if strings.HasPrefix(k, ozf.tagPrefix) {
+						k_tag := k[tagPrefixLen:]
+						vs = applyReplaceMap(vs, ozf.replace)
+						vs = applyReplaceMap(vs, ozf.replaceTagValue)
 
-						t := &Tag{k, vs_tag}
+						t := &Tag{k_tag, vs}
 
 						//FIXME: Less append, more correct sizing from start
 						keyExtension = append(keyExtension, t)
 					}
-				} else {
-					err = fmt.Errorf("Unexpected type %s %+V", k, v)
-					break
 				}
 			}
 		}
@@ -318,9 +349,9 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 		}
 
 		zabbix_key := opentsdb_key.(string)
-		suffix := keyExtension.MakeKey()
+		suffix := keyExtension.MakeKey(ozf.tagDelimiterMode)
 		if suffix != "" {
-			zabbix_key = fmt.Sprintf("%s.%s", zabbix_key, suffix)
+			zabbix_key = fmt.Sprintf("%s%s", zabbix_key, suffix)
 		}
 
 		if len(zabbix_key) > ZABBIX_KEY_LENGTH_LIMIT {
@@ -331,7 +362,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 					pack2.Recycle()
 					continue
 				} else {
-					zabbix_key = fmt.Sprintf("%s.%s", opentsdb_key.(string), keyExtension.MakeKey())
+					zabbix_key = fmt.Sprintf("%s%s", opentsdb_key.(string), keyExtension.MakeKey(ozf.tagDelimiterMode))
 				}
 			}
 
@@ -369,6 +400,7 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 		pack2.Message.AddField(field)
 
 		pack2.Message.SetType(ozf.msgType)
+		pack2.Message.SetTimestamp(pack.Message.GetTimestamp())
 		fr.Inject(pack2)
 	}
 
