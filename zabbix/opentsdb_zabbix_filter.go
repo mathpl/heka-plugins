@@ -271,10 +271,6 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 		//FIXME: Configurable field names. (data. prefix )
 		for _, field := range fields {
 			k := field.GetName()
-			if _, found := ozf.stripTags[k]; found {
-				//Stripped tag, do not process
-				continue
-			}
 
 			k = applyReplaceMap(k, ozf.replace)
 			k = applyReplaceMap(k, ozf.replaceTagName)
@@ -310,6 +306,11 @@ func (ozf *OpentsdbZabbixFilter) Run(fr FilterRunner, h PluginHelper) (err error
 				if vs, ok := v.(string); ok {
 					if strings.HasPrefix(k, ozf.tagPrefix) {
 						k_tag := k[tagPrefixLen:]
+						if _, found := ozf.stripTags[k_tag]; found {
+							//Stripped tag, do not process
+							continue
+						}
+
 						vs = applyReplaceMap(vs, ozf.replace)
 						vs = applyReplaceMap(vs, ozf.replaceTagValue)
 
