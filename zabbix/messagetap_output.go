@@ -89,8 +89,6 @@ func (mt *MessageTapOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 
 			if msg, localErr := or.Encode(pack); localErr != nil {
 				or.LogError(fmt.Errorf("Encoder failure: %s", localErr))
-				pack.Recycle()
-				continue
 			} else {
 				if len(mt.clients) > 0 {
 					client_status := make(map[int]bool, 0)
@@ -114,11 +112,9 @@ func (mt *MessageTapOutput) Run(or OutputRunner, h PluginHelper) (err error) {
 						}
 						mt.clients = new_client_list
 					}
-				} else {
-					//Drop the pack, no one is listening!
-					pack.Recycle()
 				}
 			}
+			pack.Recycle()
 		}
 	}
 
