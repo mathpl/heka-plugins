@@ -94,10 +94,11 @@ func (t *TcollectorInput) Init(config interface{}) (err error) {
 }
 
 func NetworkPayloadParserAndAnswer(conn net.Conn,
-	parser StreamParser,
+	parser *TokenParser,
 	ir InputRunner,
 	signers map[string]Signer,
 	dr DecoderRunner) (err error) {
+
 	var (
 		pack   *PipelinePack
 		record []byte
@@ -165,17 +166,7 @@ func (t *TcollectorInput) handleConnection(conn net.Conn) {
 		}
 	}
 
-	var (
-		parser        StreamParser
-		parseFunction NetworkParseFunction
-	)
-
-	tp := NewTokenParser()
-	parser = tp
-	parseFunction = NetworkPayloadParserAndAnswer
-	if len(t.config.Delimiter) == 1 {
-		tp.SetDelimiter(t.config.Delimiter[0])
-	}
+	parser := NewTokenParser()
 
 	var err error
 	stopped := false
@@ -185,7 +176,7 @@ func (t *TcollectorInput) handleConnection(conn net.Conn) {
 		case <-t.stopChan:
 			stopped = true
 		default:
-			err = parseFunction(conn, parser, t.ir, t.config.Signers, dr)
+			err = NetworkPayloadParserAndAnswer(conn, parser, t.ir, t.config.Signers, dr)
 			if err != nil {
 				if neterr, ok := err.(net.Error); ok && neterr.Timeout() {
 					// keep the connection open, we are just checking to see if

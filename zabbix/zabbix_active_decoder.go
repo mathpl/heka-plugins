@@ -15,17 +15,27 @@ import (
 type ZabbixActiveDecoder struct {
 	runner DecoderRunner
 	helper PluginHelper
-	config *ZabbixActiveDecoderConfig
+	conf   *ZabbixActiveDecoderConfig
+
+	msgType string
 }
 
-type ZabbixActiveDecoderConfig struct{}
+type ZabbixActiveDecoderConfig struct {
+	// Message type for outbound messages
+	MessageType string `toml:"msg_type"`
+}
 
 func (d *ZabbixActiveDecoder) ConfigStruct() interface{} {
 	return &ZabbixActiveDecoderConfig{}
 }
 
 func (d *ZabbixActiveDecoder) Init(config interface{}) error {
-	d.config = config.(*ZabbixActiveDecoderConfig)
+	d.conf = config.(*ZabbixActiveDecoderConfig)
+	d.msgType = d.conf.MessageType
+	if d.msgType == "" {
+		d.msgType = "zabbix"
+	}
+
 	return nil
 }
 
@@ -54,17 +64,17 @@ func (d *ZabbixActiveDecoder) Decode(pack *PipelinePack) (packs []*PipelinePack,
 		}
 		pack.Message.SetTimestamp(time.Unix(int64(unixTime), 0).UnixNano())
 
-		if err = d.addStatField(pack, "Key", metric.Key); err != nil {
+		if err = d.addStatField(pack, "key", metric.Key); err != nil {
 			continue
 		}
-		if err = d.addStatField(pack, "Host", metric.Host); err != nil {
+		if err = d.addStatField(pack, "host", metric.Host); err != nil {
 			continue
 		}
-		if err = d.addStatField(pack, "Value", metric.Value); err != nil {
+		if err = d.addStatField(pack, "value", metric.Value); err != nil {
 			continue
 		}
 
-		pack.Message.SetType("zabbix")
+		pack.Message.SetType(d.msgType)
 		packs = append(packs, pack)
 		pack = nil
 	}

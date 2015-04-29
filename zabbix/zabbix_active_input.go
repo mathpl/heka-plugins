@@ -23,7 +23,6 @@ import (
 	"code.google.com/p/go-uuid/uuid"
 
 	"github.com/mathpl/active_zabbix"
-	//. "github.com/mozilla-services/heka/message"
 	. "github.com/mozilla-services/heka/pipeline"
 )
 

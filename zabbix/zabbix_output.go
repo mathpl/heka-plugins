@@ -146,7 +146,7 @@ func (zo *ZabbixOutput) Filter(pack *PipelinePack) (discard bool, err error) {
 
 	discard = true
 
-	if val, found = pack.Message.GetFieldValue("Key"); !found {
+	if val, found = pack.Message.GetFieldValue("key"); !found {
 		err = fmt.Errorf("No Key in message")
 		pack.Recycle()
 		return
@@ -157,7 +157,7 @@ func (zo *ZabbixOutput) Filter(pack *PipelinePack) (discard bool, err error) {
 		return
 	}
 
-	if val, found = pack.Message.GetFieldValue("Host"); !found {
+	if val, found = pack.Message.GetFieldValue("host"); !found {
 		err = fmt.Errorf("No Host in message")
 		pack.Recycle()
 		return
