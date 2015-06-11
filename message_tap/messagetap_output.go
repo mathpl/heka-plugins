@@ -1,4 +1,4 @@
-package plugins
+package message_tap
 
 import (
 	"fmt"
